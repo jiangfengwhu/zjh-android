@@ -31,7 +31,7 @@ react {
     //   skip the bundling of the JS bundle and the assets. Default is "debug", "debugOptimized".
     //   If you add flavors like lite, prod, etc. you'll have to list your debuggableVariants.
     // debuggableVariants = ["liteDebug", "liteDebugOptimized", "prodDebug", "prodDebugOptimized"]
-    //   release 的 JS 包（vendor 主包和 app 包）由 scripts/bundle-release-now.ts 写进 src/main/assets，
+    //   release 的 JS 包由 scripts/prepare-apk.cjs 下载并校验后写进 src/main/assets，
     //   不让这里再打一份，否则会和已放好的 index.android.bundle 重复。
     debuggableVariants = ["debug", "debugOptimized", "release"]
 
@@ -50,7 +50,6 @@ react {
     //
     //   The entry file for bundle generation. Default is 'index.android.js' or 'index.js'
     // entryFile = file("../js/MyApplication.android.js")
-    entryFile = file("../../vendor-entry.js")
     //
     //   A list of extra flags to pass to the 'bundle' commands.
     //   See https://github.com/react-native-community/cli/blob/main/docs/commands.md#bundle
@@ -130,7 +129,7 @@ tasks.register("verifyReleaseRuntime") {
     doLast {
         def stamp = file("src/main/assets/runtime-version.txt")
         if (!stamp.exists() || stamp.getText("UTF-8").trim() != bundleRuntimeVersion) {
-            throw new GradleException("APK 版本号与预打包资源不匹配，请先执行 npx tsx scripts/bundle-release-now.ts")
+            throw new GradleException("APK 版本号与预打包资源不匹配，请先执行 npm run prepare:apk")
         }
     }
 }

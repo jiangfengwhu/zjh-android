@@ -217,7 +217,7 @@ class ReleaseStore(private val context: Context) {
     val vendor = copyAsset("index.android.bundle")
       ?: throw IllegalStateException("APK 里没有主包 index.android.bundle")
     val app = copyAsset("app.bundle")
-    if (app == null) Log.e(TAG, "apk has no app.bundle, run scripts/bundle-release-now.ts before building")
+    if (app == null) Log.e(TAG, "apk has no app.bundle, run npm run prepare:apk before building")
     val name = "seed-$stamp"
     val doc = JSONObject()
       .put("format", FORMAT)
