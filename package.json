@@ -1,0 +1,8 @@
+{
+  "name": "zjh-android",
+  "private": true,
+  "scripts": {
+    "prepare:apk": "node scripts/prepare-apk.cjs",
+    "publish:runtime": "node scripts/publish-runtime.cjs"
+  }
+}

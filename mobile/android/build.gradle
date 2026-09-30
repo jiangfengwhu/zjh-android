@@ -1,0 +1,36 @@
+buildscript {
+    ext {
+        buildToolsVersion = "37.0.0"
+        minSdkVersion = 26
+        compileSdkVersion = 37
+        targetSdkVersion = 36
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.2.0"
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        classpath("org.jetbrains.kotlin:compose-compiler-gradle-plugin:2.2.0")
+    }
+}
+
+apply plugin: "com.facebook.react.rootproject"
+
+// This screens version ignores the JS transitionDuration on Android and uses config_mediumAnimTime (~400ms).
+def routeAnimDir = file("../node_modules/react-native-screens/android/src/main/res/base/anim")
+["rns_slide_in_from_right.xml", "rns_slide_out_to_left.xml", "rns_slide_in_from_left.xml", "rns_slide_out_to_right.xml"].each { name ->
+    def target = new File(routeAnimDir, name)
+    if (!target.exists()) {
+        return
+    }
+    def text = target.getText("UTF-8")
+    def next = text.replace("@android:integer/config_mediumAnimTime", "180")
+    if (next != text) {
+        target.write(next, "UTF-8")
+    }
+}

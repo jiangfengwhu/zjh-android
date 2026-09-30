@@ -1,0 +1,52 @@
+diff --git a/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ExoPlayerView.kt b/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ExoPlayerView.kt
+--- a/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ExoPlayerView.kt
++++ b/node_modules/react-native-video/android/src/main/java/com/brentvatne/exoplayer/ExoPlayerView.kt
+@@ -4,6 +4,7 @@
+ import android.graphics.Color
+ import android.graphics.drawable.GradientDrawable
+ import android.util.AttributeSet
++import android.view.LayoutInflater
+ import android.view.View
+ import android.view.View.MeasureSpec
+ import android.widget.FrameLayout
+@@ -15,6 +16,7 @@
+ import androidx.media3.ui.AspectRatioFrameLayout
+ import androidx.media3.ui.DefaultTimeBar
+ import androidx.media3.ui.PlayerView
++import com.brentvatne.react.R
+ import com.brentvatne.common.api.ResizeMode
+ import com.brentvatne.common.api.SubtitleStyle
+ 
+@@ -37,7 +39,10 @@
+         visibility = View.GONE
+     }
+ 
+-    private val playerView = PlayerView(context).apply {
++    // PlayerView's programmatic constructor defaults to SurfaceView. Inflate
++    // explicit texture attributes so inline Jolly videos scroll and clip normally.
++    private val playerView = (LayoutInflater.from(context)
++        .inflate(R.layout.rnv_texture_player_view, this, false) as PlayerView).apply {
+         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+         setShutterBackgroundColor(Color.TRANSPARENT)
+         useController = true
+@@ -49,6 +54,7 @@
+         // Enable proper surface view handling to prevent rendering issues
+         setUseArtwork(false)
+         setDefaultArtwork(null)
++        setKeepContentOnPlayerReset(true)
+         // Ensure proper video scaling - start with FIT mode
+         resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+     }
+diff --git a/node_modules/react-native-video/android/src/main/res/layout/rnv_texture_player_view.xml b/node_modules/react-native-video/android/src/main/res/layout/rnv_texture_player_view.xml
+new file mode 100644
+--- /dev/null
++++ b/node_modules/react-native-video/android/src/main/res/layout/rnv_texture_player_view.xml
+@@ -0,0 +1,8 @@
++<?xml version="1.0" encoding="utf-8"?>
++<androidx.media3.ui.PlayerView
++    xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    app:surface_type="texture_view"
++    app:keep_content_on_player_reset="true" />
