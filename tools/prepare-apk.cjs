@@ -13,7 +13,7 @@ async function main() {
   if (release.format !== 3 || release.runtimeVersion !== runtimeVersion(root)) {
     throw new Error('线上 RN 包与当前 APK 版本不一致，请先发布对应运行时的 RN 包');
   }
-  const assets = path.join(root, 'mobile/android/app/src/main/assets');
+  const assets = path.join(root, 'android/app/src/main/assets');
   await fs.mkdir(assets, { recursive: true });
   for (const [kind, filename] of [['vendor', 'index.android.bundle'], ['app', 'app.bundle']]) {
     const item = release[kind];

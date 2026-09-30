@@ -4,7 +4,7 @@ const path = require('node:path');
 
 // APK 和热更新共用同一份版本号。只有发布新 APK 时才递增 versionCode。
 function runtimeVersion(repoRoot) {
-  const version = JSON.parse(fs.readFileSync(path.join(repoRoot, 'mobile/apk-version.json'), 'utf8'));
+  const version = JSON.parse(fs.readFileSync(path.join(repoRoot, 'config/apk-version.json'), 'utf8'));
   if (!Number.isInteger(version.versionCode) || version.versionCode < 1 || version.versionCode > 2100000000) {
     throw new Error('APK versionCode 必须是 1 到 2100000000 之间的整数');
   }

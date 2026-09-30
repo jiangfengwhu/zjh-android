@@ -16,7 +16,7 @@ async function javaFiles(directory) {
 
 async function main() {
   const root = path.resolve(__dirname, '..');
-  const out = path.join(root, 'out/runtime');
+  const out = path.join(root, 'dist/runtime');
   const classes = path.join(out, 'classes');
   await fs.mkdir(classes, { recursive: true });
   const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
@@ -25,12 +25,12 @@ async function main() {
   if (!platforms.length) throw new Error('缺少 Android SDK platform');
   const jar = path.join(sdk, 'platforms', platforms[0], 'android.jar');
   const javaBin = name => process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin', name + (process.platform === 'win32' ? '.exe' : '')) : name;
-  execFileSync(javaBin('javac'), ['--release', '17', '-classpath', jar, '-d', classes, ...await javaFiles(path.join(root, 'bridge/java'))], { stdio: 'inherit', windowsHide: true });
+  execFileSync(javaBin('javac'), ['--release', '17', '-classpath', jar, '-d', classes, ...await javaFiles(path.join(root, 'sdk/bridge/java'))], { stdio: 'inherit', windowsHide: true });
   const sdkFile = path.join(out, 'bridge-sdk.jar');
   execFileSync(javaBin('jar'), ['cf', sdkFile, '-C', classes, '.'], { stdio: 'inherit', windowsHide: true });
   const bytes = await fs.readFile(sdkFile);
   const sha256 = createHash('sha256').update(bytes).digest('hex');
-  const apk = JSON.parse(await fs.readFile(path.join(root, 'mobile/apk-version.json'), 'utf8'));
+  const apk = JSON.parse(await fs.readFile(path.join(root, 'config/apk-version.json'), 'utf8'));
   const contract = { format: 1, apk, runtimeVersion: runtimeVersion(root), dynamicRepository: 'jiangfengwhu/zjh-dynamic', bridgeSdk: { sha256, bytes: bytes.length } };
   const file = path.join(out, 'runtime.json');
   await fs.writeFile(file, JSON.stringify(contract));

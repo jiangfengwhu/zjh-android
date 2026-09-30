@@ -2,7 +2,7 @@
 
 `react-native-video` 6.19.3 constructs Android's `PlayerView` without attributes,
 which selects a `SurfaceView`. Its `updateSurfaceView` method is empty, so the
-`ViewType.TEXTURE` prop in `components/jolly/video.tsx` does not change that surface.
+`ViewType.TEXTURE` prop in `zjh-dynamic/packages/ui/jolly/video.tsx` does not change that surface.
 
 The patch inflates a `PlayerView` with `surface_type="texture_view"` and preserves
 the last frame when the player resets. All current app video usage is Jolly's
