@@ -17,3 +17,4 @@ build/
 android/app/src/main/assets/*.bundle
 android/app/src/main/assets/*.json
 android/app/src/main/assets/runtime-version.txt
+android/app/src/main/assets/applications/
