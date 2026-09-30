@@ -9,6 +9,7 @@ import com.zijinhua.app.MainApplication
 import com.zijinhua.app.bundle.BundleInventory
 import com.zijinhua.app.bundle.ReleaseStore
 import com.zijinhua.app.bundle.SplitBundle
+import com.zijinhua.app.bundle.ApplicationStore
 import com.zijinhua.app.shell.ShellAlarms
 import com.zijinhua.app.shell.ShellAi
 import com.zijinhua.app.shell.ShellBluetooth
@@ -120,6 +121,35 @@ object PluginCenter {
     })
     registry.register("shell", "loadApp", PluginHandler { _ ->
       loadApp()
+    })
+    registry.register("shell", "loadApplication", PluginHandler { payload ->
+      val context = appContext ?: throw IllegalStateException("plugin center not installed")
+      val manifest = JSONObject(payload)
+      val file = io.submit<java.io.File> { ApplicationStore(context).obtain(manifest) }.get(90, TimeUnit.SECONDS)
+      val assets = io.submit<JSONObject> { ApplicationStore(context).assets(manifest) }.get(180, TimeUnit.SECONDS)
+      SplitBundle.load((context.applicationContext as MainApplication).reactHost, file.absolutePath)
+      JSONObject().put("ok", true).put("assets", assets).put("releaseId", manifest.getString("releaseId")).toString()
+    })
+    registry.register("shell", "applicationSeed", PluginHandler { payload ->
+      val context = appContext ?: throw IllegalStateException("plugin center not installed")
+      JSONObject().put("manifest", ApplicationStore(context).seed(JSONObject(payload).getString("appId"))).toString()
+    })
+    registry.register("shell", "prepareApplication", PluginHandler { payload ->
+      val context = appContext ?: throw IllegalStateException("plugin center not installed")
+      val manifest = JSONObject(payload)
+      io.submit<Boolean> {
+        ApplicationStore(context).obtain(manifest)
+        ApplicationStore(context).assets(manifest)
+        true
+      }.get(180, TimeUnit.SECONDS)
+      JSONObject().put("ok", true).toString()
+    })
+    registry.register("shell", "reloadApplications", PluginHandler { _ ->
+      val context = appContext ?: throw IllegalStateException("plugin center not installed")
+      appContextId = 0
+      setBundleLoading(true)
+      (context.applicationContext as MainApplication).reactHost.reload("application-update")
+      JSONObject().put("ok", true).toString()
     })
     registry.register("shell", "checkUpdates", PluginHandler { _ ->
       Log.i(TAG, "check updates")

@@ -30,6 +30,21 @@ async function main() {
     await fs.rename(path.join(assets, `${filename}.tmp`), path.join(assets, filename));
   }
   await fs.writeFile(path.join(assets, 'runtime-version.txt'), release.runtimeVersion);
+  const seedResponse = await fetch(`${edge}/v1/applications/jolly/latest`);
+  if (!seedResponse.ok) throw new Error(`Jolly 默认应用清单读取失败：${seedResponse.status}`);
+  const application = await seedResponse.json();
+  if (application.appId !== 'jolly' || application.format !== 1) throw new Error('Jolly 默认应用清单无效');
+  const applicationDir = path.join(assets, 'applications/jolly');
+  await fs.mkdir(applicationDir, { recursive: true });
+  for (const item of [application.bundle, ...(application.assets || [])]) {
+    if (!/^[a-f0-9]{64}$/.test(item.sha256)) throw new Error('默认应用包体哈希无效');
+    const response = await fetch(`${cdn}/v1/app/${item.sha256}`);
+    if (!response.ok) throw new Error(`默认应用下载失败：${response.status}`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length !== item.bytes || createHash('sha256').update(bytes).digest('hex') !== item.sha256) throw new Error('默认应用包体校验失败');
+    await fs.writeFile(path.join(applicationDir, `${item.sha256}.bundle`), bytes);
+  }
+  await fs.writeFile(path.join(applicationDir, 'manifest.json'), JSON.stringify(application));
   console.log(`APK seed ready: release=${release.id}`);
 }
 

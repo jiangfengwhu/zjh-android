@@ -1,0 +1,16 @@
+{
+  "sdk": "1.0.0",
+  "shared": [
+    "react",
+    "react/jsx-runtime",
+    "react/jsx-dev-runtime",
+    "react-native",
+    "react-native-svg",
+    "react-native-markdown-display",
+    "react-native-reanimated",
+    "react-native-linear-gradient",
+    "react-native-safe-area-context",
+    "react-native-video",
+    "react-native-worklets"
+  ]
+}
