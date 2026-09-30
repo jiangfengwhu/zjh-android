@@ -2,6 +2,8 @@
 
 负责 Android 原生能力、权限、桥接协议、更新加载与回退、APK 版本和原生依赖补丁。RN 业务由 [zjh-dynamic](https://github.com/jiangfengwhu/zjh-dynamic) 维护，云端接口由 [zjh-server](https://github.com/jiangfengwhu/zjh-server) 维护。构建只下载动态发布产物，不要求检出其他仓库。
 
+本仓库由本地维护者管理，不向云端 Agent 开放。云端只使用 zjh-dynamic；原生能力需求由用户交给本地维护者处理，不向云端提供本仓库源码或管理凭证。
+
 ## 目录
 
 | 路径 | 职责 |
@@ -30,3 +32,5 @@
 壳维护者登录 Cloudflare Wrangler 后执行 `npm run publish:runtime`，发布桥接 SDK 与 /v1/runtime。该操作需要管理权限，动态包发布凭证不能修改契约。服务端的域名、KV、R2 绑定由 zjh-server 管理。
 
 本仓库独立安装原生依赖；不使用动态仓库的 node_modules 或源码。
+
+含原生实现的 RN 依赖由壳维护者协调两个仓库的版本与锁文件，并验证 APK 实际包含所需能力；仅更新动态依赖清单不代表 APK 已支持。纯文档修改无需构建 APK 或发布运行时契约。
