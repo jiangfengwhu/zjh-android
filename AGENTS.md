@@ -1,6 +1,6 @@
 # 仓库边界
 
-只维护 Android 静态壳。RN 业务在 zjh-dynamic，服务端在 zjh-server；不复制这些源码或历史到本仓库。
+只维护 Android 静态壳。SDK 与 RN 宿主在 zjh-dynamic，应用业务在 zjh-plugin，服务端在 zjh-server；不复制这些源码或历史到本仓库。
 
 本仓库仅供本地维护者使用，不向云端 Agent 开放。不要把本仓库源码、原生补丁或 Cloudflare 管理凭证放入动态仓库或云端环境。云端提出原生需求时，由本地维护者按用户授权处理。
 
