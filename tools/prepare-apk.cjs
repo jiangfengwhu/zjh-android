@@ -30,7 +30,7 @@ async function main() {
     await fs.rename(path.join(assets, `${filename}.tmp`), path.join(assets, filename));
   }
   await fs.writeFile(path.join(assets, 'runtime-version.txt'), release.runtimeVersion);
-  const seedResponse = await fetch(`${edge}/v1/applications/jolly/latest`);
+  const seedResponse = await fetch(`${edge}/v1/applications/jolly/public`);
   if (!seedResponse.ok) throw new Error(`Jolly 默认应用清单读取失败：${seedResponse.status}`);
   const application = await seedResponse.json();
   if (application.appId !== 'jolly' || application.format !== 1) throw new Error('Jolly 默认应用清单无效');
