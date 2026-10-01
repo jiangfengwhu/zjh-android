@@ -1,5 +1,5 @@
 {
-  "sdk": "1.0.0",
+  "sdk": "1.1.0",
   "shared": [
     "react",
     "react/jsx-runtime",
