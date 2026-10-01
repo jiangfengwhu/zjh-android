@@ -49,12 +49,27 @@ import androidx.lifecycle.Lifecycle
 import com.facebook.react.ReactHost
 import com.facebook.react.interfaces.fabric.ReactSurface
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
+import com.facebook.react.modules.core.PermissionAwareActivity
+import com.facebook.react.modules.core.PermissionListener
 import com.zijinhua.app.plugin.PluginCenter
 import com.zijinhua.app.shell.ShellAi
 import com.zijinhua.app.shell.ShellCapabilities
 
 // react-native-screens 的原生栈会把 Activity 转成 AppCompatActivity。它同时是 FragmentActivity，Compose 的 setContent 仍可用。
-class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
+class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
+  private val permissionListeners = mutableMapOf<Int, PermissionListener>()
+
+  override fun requestPermissions(permissions: Array<String>, requestCode: Int, listener: PermissionListener?) {
+    if (listener != null) permissionListeners[requestCode] = listener
+    super.requestPermissions(permissions, requestCode)
+  }
+
+  override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    val listener = permissionListeners.remove(requestCode)
+    listener?.onRequestPermissionsResult(requestCode, permissions.map { it }.toTypedArray(), grantResults)
+  }
+
   private val reactHost: ReactHost
     get() = (application as MainApplication).reactHost
 
