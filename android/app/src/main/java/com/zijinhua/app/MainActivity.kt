@@ -1,5 +1,7 @@
 package com.zijinhua.app
 
+import android.content.Intent
+import com.swmansion.rnscreens.fragment.restoration.RNScreensFragmentFactory
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
@@ -85,6 +87,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
 
   override fun onCreate(savedInstanceState: Bundle?) {
     val splash = installSplashScreen()
+    supportFragmentManager.fragmentFactory = RNScreensFragmentFactory()
     super.onCreate(savedInstanceState)
     splash.setKeepOnScreenCondition { splashHeld }
     splash.setOnExitAnimationListener { screen ->
@@ -122,6 +125,22 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler {
       }
     }
     Log.i(TAG, "activity created")
+  }
+
+  @Deprecated("Activity result API is used by React Native libraries")
+  override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    super.onActivityResult(requestCode, resultCode, data)
+    reactHost.onActivityResult(this, requestCode, resultCode, data)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    reactHost.onNewIntent(intent)
+  }
+
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    reactHost.onWindowFocusChange(hasFocus)
   }
 
   override fun onResume() {
