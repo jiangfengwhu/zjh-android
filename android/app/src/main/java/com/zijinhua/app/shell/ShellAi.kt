@@ -26,6 +26,8 @@ object ShellAi {
     private set
   var windowColor: Int? = null
     private set
+  var immersive: Boolean = false
+    private set
 
   fun register(registry: PluginRegistry, context: Context) {
     val app = context.applicationContext
@@ -39,6 +41,7 @@ object ShellAi {
   }
 
   fun restore(context: Context) {
+    immersive = false
     lightSurface = readMode(context) == "light"
     val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_BARS, null) ?: return
     val saved = JSONObject(raw)
@@ -55,6 +58,8 @@ object ShellAi {
       return JSONObject().put("ok", false).put("error", "statusBar 需要 #RRGGBB")
     }
     if (input.has("light")) lightSurface = input.optBoolean("light")
+    // A page owns this transient state; never persist immersive mode across startup.
+    if (input.has("immersive")) immersive = input.optBoolean("immersive")
     statusBarColor = status
     navigationBarColor = navigation
     windowColor = window

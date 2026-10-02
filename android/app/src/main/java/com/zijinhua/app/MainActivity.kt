@@ -45,6 +45,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.Lifecycle
 import com.facebook.react.ReactHost
 import com.facebook.react.interfaces.fabric.ReactSurface
@@ -156,6 +157,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
     reactHost.onWindowFocusChange(hasFocus)
+    if (hasFocus) applySystemBars()
   }
 
   override fun onResume() {
@@ -220,6 +222,13 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
       controller.isAppearanceLightStatusBars = light
       controller.isAppearanceLightNavigationBars = light
       Log.i(TAG, "system bars light=$light status=transparent navigation=transparent backdrop=${Integer.toHexString(backdrop)}")
+    }
+    val bars = WindowInsetsControllerCompat(window, window.decorView)
+    if (ShellAi.immersive) {
+      bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+      bars.hide(WindowInsetsCompat.Type.systemBars())
+    } else {
+      bars.show(WindowInsetsCompat.Type.systemBars())
     }
     pinContentToScreenEdges()
   }
