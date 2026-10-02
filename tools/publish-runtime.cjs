@@ -33,7 +33,7 @@ async function main() {
   const apk = JSON.parse(await fs.readFile(path.join(root, 'config/apk-version.json'), 'utf8'));
   const lock = JSON.parse(await fs.readFile(path.join(root, "package-lock.json"), "utf8"));
   const publicModules = JSON.parse(await fs.readFile(path.join(root, "config/application-platform.json"), "utf8"));
-  const shared = Object.fromEntries(publicModules.shared.map(name => [name, lock.packages[`node_modules/${name.split("/")[0]}`].version]));
+  const shared = Object.fromEntries(publicModules.shared.map(name => [name, lock.packages[`node_modules/${(name.startsWith("@") ? name.split("/").slice(0, 2).join("/") : name.split("/")[0])}`].version]));
   const applications = { engineAbi: `rn-${shared["react-native"]}-hermes-${lock.packages["node_modules/hermes-compiler"].version}`, sdk: publicModules.sdk, shared };
   const contract = { format: 1, applications, apk, runtimeVersion: runtimeVersion(root), dynamicRepository: 'jiangfengwhu/zjh-dynamic', bridgeSdk: { sha256, bytes: bytes.length } };
   const file = path.join(out, 'runtime.json');
