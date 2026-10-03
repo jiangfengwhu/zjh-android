@@ -7,8 +7,8 @@ diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansi
  
 -        val screenForNavBarHidden = findScreenForTrait(screen, WindowTraits.NAVIGATION_BAR_HIDDEN)
 -        val hidden = screenForNavBarHidden?.isNavigationBarHidden ?: false
-+        // Zijinhua owns navigation visibility globally; page transitions must not reveal it.
-+        val hidden = true
++        // Zijinhua owns navigation visibility globally; page transitions must keep system gestures available.
++        val hidden = false
  
          if (hidden) {
              WindowInsetsControllerCompat(window, window.decorView).let { controller ->

@@ -225,8 +225,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     }
     val bars = WindowInsetsControllerCompat(window, window.decorView)
     // Navigation is a window-level policy, independent of page and tab scrolling.
-    bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-    bars.hide(WindowInsetsCompat.Type.navigationBars())
+    bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+    bars.show(WindowInsetsCompat.Type.navigationBars())
     if (ShellAi.immersive) {
       bars.hide(WindowInsetsCompat.Type.statusBars())
     } else {
@@ -235,7 +235,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     pinContentToScreenEdges()
   }
 
-  /** 全屏容器延伸至屏幕边缘，导航栏默认隐藏，不参与页面布局。 */
+  /** 全屏容器延伸至屏幕边缘，导航栏透明且保持可见，内容仍延伸至屏幕边缘。 */
   private fun pinContentToScreenEdges() {
     WindowCompat.setDecorFitsSystemWindows(window, false)
     if (edgesPinned) return
