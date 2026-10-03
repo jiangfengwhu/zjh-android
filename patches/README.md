@@ -1,14 +1,7 @@
-# Jolly video rendering
+# 原生依赖补丁
 
-`react-native-video` 6.19.3 constructs Android's `PlayerView` without attributes,
-which selects a `SurfaceView`. Its `updateSurfaceView` method is empty, so the
-`ViewType.TEXTURE` prop in `zjh-plugin/apps/jolly/src/ui/video.tsx` does not change that surface.
+npm ci / npm install 通过 postinstall 自动运行 patch-package；补丁改变原生实现，必须随新 APK 交付。
 
-The patch inflates a `PlayerView` with `surface_type="texture_view"` and preserves
-the last frame when the player resets. All current app video usage is Jolly's
-inline, unencrypted animation, which needs scrolling, transforms and rounded
-clipping. This patch selects texture rendering for every Android video instance;
-revisit it before adding secure/DRM video or upgrading the video library.
+react-native-video 6.19.3 的 Android PlayerView 默认使用 SurfaceView，ViewType.TEXTURE 不生效。现有补丁改为 TextureView 并保留重置时的最后一帧，支持 Jolly 视频随列表滚动、变换和圆角裁切。
 
-`npm install` / `npm ci` applies it through `postinstall`. Native changes require
-a new APK; publishing a JavaScript bundle alone cannot apply this fix.
+补丁作用于所有 Android 视频实例。升级该库或加入安全/DRM 视频前需重新审视补丁，不能仅发布 JS 包来更新它。
