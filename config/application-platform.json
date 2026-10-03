@@ -1,5 +1,5 @@
 {
-  "sdk": "1.3.0",
+  "sdk": "1.4.0",
   "shared": [
     "@d11/react-native-fast-image",
     "@gorhom/bottom-sheet",
@@ -43,6 +43,9 @@
     "react-native-worklets",
     "zod",
     "react/jsx-runtime",
-    "react/jsx-dev-runtime"
+    "react/jsx-dev-runtime",
+    "react-native-enriched-markdown",
+    "@baronha/react-native-multiple-image-picker",
+    "react-native-nitro-web-image"
   ]
 }

@@ -7,6 +7,7 @@ import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.common.build.ReactBuildConfig
+import com.facebook.react.common.assets.ReactFontManager
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.zijinhua.app.bundle.ReleaseCheck
 import com.zijinhua.app.bundle.ReleaseStore
@@ -36,6 +37,7 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    ReactFontManager.getInstance().addCustomFont(this, "Fusion Pixel 12px Proportional SC", R.font.fusion_pixel)
     if (!ReactBuildConfig.DEBUG) {
       ReleaseStore(this).prepareBoot()
     }
