@@ -1,0 +1,14 @@
+diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt
+--- a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt
++++ b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt
+@@ -130,8 +130,8 @@
+ 
+         val window = activity.window
+ 
+-        val screenForNavBarHidden = findScreenForTrait(screen, WindowTraits.NAVIGATION_BAR_HIDDEN)
+-        val hidden = screenForNavBarHidden?.isNavigationBarHidden ?: false
++        // Zijinhua owns navigation visibility globally; page transitions must not reveal it.
++        val hidden = true
+ 
+         if (hidden) {
+             WindowInsetsControllerCompat(window, window.decorView).let { controller ->

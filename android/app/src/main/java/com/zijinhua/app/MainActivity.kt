@@ -224,16 +224,18 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
       Log.i(TAG, "system bars light=$light status=transparent navigation=transparent backdrop=${Integer.toHexString(backdrop)}")
     }
     val bars = WindowInsetsControllerCompat(window, window.decorView)
+    // Navigation is a window-level policy, independent of page and tab scrolling.
+    bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+    bars.hide(WindowInsetsCompat.Type.navigationBars())
     if (ShellAi.immersive) {
-      bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-      bars.hide(WindowInsetsCompat.Type.systemBars())
+      bars.hide(WindowInsetsCompat.Type.statusBars())
     } else {
-      bars.show(WindowInsetsCompat.Type.systemBars())
+      bars.show(WindowInsetsCompat.Type.statusBars())
     }
     pinContentToScreenEdges()
   }
 
-  /** 系统栏保持透明，内容从物理屏幕顶边和底边开始画，不再被状态栏和导航栏挤进去。 */
+  /** 全屏容器延伸至屏幕边缘，导航栏默认隐藏，不参与页面布局。 */
   private fun pinContentToScreenEdges() {
     WindowCompat.setDecorFitsSystemWindows(window, false)
     if (edgesPinned) return
