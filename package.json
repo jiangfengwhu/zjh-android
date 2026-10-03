@@ -8,7 +8,6 @@
     "publish:runtime": "node tools/publish-runtime.cjs"
   },
   "dependencies": {
-    "@baronha/react-native-multiple-image-picker": "2.2.5",
     "@d11/react-native-fast-image": "8.13.0",
     "@gorhom/bottom-sheet": "5.2.14",
     "@react-native-clipboard/clipboard": "1.16.3",
