@@ -7,3 +7,5 @@ react-native-video 6.19.3 的 Android PlayerView 默认使用 SurfaceView，View
 补丁作用于所有 Android 视频实例。升级该库或加入安全/DRM 视频前需重新审视补丁，不能仅发布 JS 包来更新它。
 
 react-native-screens 4.28.0 的导航栏可见性默认值会在页面切换时显示系统导航。配套 APK 1.4.2 补丁统一保持导航栏可见且透明，与 MainActivity 的全屏窗口策略一致；页面选项不覆盖该全局策略。顶部状态栏、方向与键盘处理不受此补丁影响。
+
+APK 1.4.3 将导航栏颜色、透明度和可见性统一为 Activity 初始化策略；screens 的页面导航栏 trait 不再写窗口，避免路由与键盘重复切换。Compose React 根容器不处理 IME padding，键盘只由宿主 KeyboardProvider 避让。

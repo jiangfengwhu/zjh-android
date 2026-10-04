@@ -1,14 +1,29 @@
 diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt
 --- a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt
 +++ b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/ScreenWindowTraits.kt
-@@ -130,8 +130,8 @@
+@@ -128,23 +128,8 @@
+             return
+         }
  
-         val window = activity.window
- 
+-        val window = activity.window
+-
 -        val screenForNavBarHidden = findScreenForTrait(screen, WindowTraits.NAVIGATION_BAR_HIDDEN)
 -        val hidden = screenForNavBarHidden?.isNavigationBarHidden ?: false
-+        // Zijinhua owns navigation visibility globally; page transitions must keep system gestures available.
-+        val hidden = false
+-
+-        if (hidden) {
+-            WindowInsetsControllerCompat(window, window.decorView).let { controller ->
+-                controller.hide(WindowInsetsCompat.Type.navigationBars())
+-                controller.systemBarsBehavior =
+-                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+-            }
+-        } else {
+-            WindowInsetsControllerCompat(
+-                window,
+-                window.decorView,
+-            ).show(WindowInsetsCompat.Type.navigationBars())
+-        }
++        // Zijinhua initializes a visible, transparent navigation bar once at
++        // the Activity level. Screens must not rewrite this window policy.
+     }
  
-         if (hidden) {
-             WindowInsetsControllerCompat(window, window.decorView).let { controller ->
+     internal fun trySetWindowTraits(

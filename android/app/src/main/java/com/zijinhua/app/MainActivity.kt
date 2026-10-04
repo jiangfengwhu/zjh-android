@@ -19,13 +19,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -114,6 +109,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
       statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
       navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
     )
+    initializeSystemBars()
     PluginCenter.onBundleLoading = { loading ->
       if (splashHeld) {
         if (!loading) splashHeld = false
@@ -192,7 +188,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   }
 
   private fun canvasColor(): Int {
-    return if (ShellAi.lightSurface) Color.parseColor("#FAF7F2") else Color.parseColor("#13100E")
+    return if (ShellAi.lightSurface) Color.parseColor("#FFF9ED") else Color.parseColor("#19152C")
   }
 
   private fun applySystemBars() {
@@ -202,37 +198,35 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     if (appliedLight != light || appliedBackdrop != backdrop) {
       appliedLight = light
       appliedBackdrop = backdrop
-      val style = if (light) {
-        SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
-      } else {
-        SystemBarStyle.dark(Color.TRANSPARENT)
-      }
-      enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
       window.setBackgroundDrawable(ColorDrawable(backdrop))
-      window.statusBarColor = Color.TRANSPARENT
-      window.navigationBarColor = Color.TRANSPARENT
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        window.navigationBarDividerColor = Color.TRANSPARENT
+      WindowInsetsControllerCompat(window, window.decorView).let { controller ->
+        controller.isAppearanceLightStatusBars = light
+        controller.isAppearanceLightNavigationBars = light
       }
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-        window.isStatusBarContrastEnforced = false
-        window.isNavigationBarContrastEnforced = false
-      }
-      val controller = WindowInsetsControllerCompat(window, window.decorView)
-      controller.isAppearanceLightStatusBars = light
-      controller.isAppearanceLightNavigationBars = light
       Log.i(TAG, "system bars light=$light status=transparent navigation=transparent backdrop=${Integer.toHexString(backdrop)}")
     }
     val bars = WindowInsetsControllerCompat(window, window.decorView)
     // Navigation is a window-level policy, independent of page and tab scrolling.
     bars.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
-    bars.show(WindowInsetsCompat.Type.navigationBars())
     if (ShellAi.immersive) {
       bars.hide(WindowInsetsCompat.Type.statusBars())
     } else {
       bars.show(WindowInsetsCompat.Type.statusBars())
     }
     pinContentToScreenEdges()
+  }
+
+  @Suppress("DEPRECATION")
+  private fun initializeSystemBars() {
+    // One window policy for the whole app. Pages and IME never rewrite it.
+    window.statusBarColor = Color.TRANSPARENT
+    window.navigationBarColor = Color.TRANSPARENT
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) window.navigationBarDividerColor = Color.TRANSPARENT
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      window.isStatusBarContrastEnforced = false
+      window.isNavigationBarContrastEnforced = false
+    }
+    WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.navigationBars())
   }
 
   /** 全屏容器延伸至屏幕边缘，导航栏透明且保持可见，内容仍延伸至屏幕边缘。 */
@@ -297,9 +291,8 @@ private fun ShellContent(
 ) {
   Box(modifier = Modifier.fillMaxSize()) {
     AndroidView(
-      modifier = Modifier
-        .fillMaxSize()
-        .windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)),
+      // React's KeyboardProvider owns IME avoidance. Keep its root geometry fixed.
+      modifier = Modifier.fillMaxSize(),
       factory = { context ->
         val created = reactHost.createSurface(context, componentName, null)
         onSurface(created)
