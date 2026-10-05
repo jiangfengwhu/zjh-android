@@ -26,7 +26,12 @@ class ApplicationStore(private val context: Context) {
     if (valid(file, sha, bytes)) return file
     val temporary = File(directory, "$sha.tmp")
     try {
-      context.assets.open("applications/$appId/$sha.bundle").use { input -> temporary.outputStream().use { input.copyTo(it) } }
+      val aliases = try {
+        context.assets.open("applications/$appId/asset-aliases.json").bufferedReader().use { JSONObject(it.readText()) }
+      } catch (_: java.io.FileNotFoundException) { JSONObject() }
+      val sharedAsset = aliases.optString(sha)
+      val seedPath = if (sharedAsset.matches(Regex("^jolly/[a-z0-9_]+\\.mp4$"))) sharedAsset else "applications/$appId/$sha.bundle"
+      context.assets.open(seedPath).use { input -> temporary.outputStream().use { input.copyTo(it) } }
       if (valid(temporary, sha, bytes) && temporary.renameTo(file)) return file
     } catch (_: java.io.FileNotFoundException) { /* The application is not included in this APK seed. */ }
     temporary.delete()

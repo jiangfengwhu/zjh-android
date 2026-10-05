@@ -71,13 +71,29 @@ async function main() {
   }
   const applicationDir = path.join(assets, 'applications/jolly');
   await fs.mkdir(applicationDir, { recursive: true });
+  const sharedAssets = new Map();
+  const mediaDir = path.join(assets, 'jolly');
+  for (const name of await fs.readdir(mediaDir)) {
+    const bytes = await readFile(path.join(mediaDir, name));
+    if (bytes) sharedAssets.set(createHash('sha256').update(bytes).digest('hex'), { name: `jolly/${name}`, bytes });
+  }
+  const aliases = {};
+  const retained = new Set();
   for (const item of [application.bundle, ...(application.assets || [])]) {
     if (!/^[a-f0-9]{64}$/.test(item.sha256)) throw new Error('默认应用包体哈希无效');
+    const shared = sharedAssets.get(item.sha256);
+    if (shared && matches(shared.bytes, item)) { aliases[item.sha256] = shared.name; continue; }
     const destination = path.join(applicationDir, `${item.sha256}.bundle`);
     const bytes = await packageBytes(root, cdn, 'app', item, destination);
     prepared.push({ destination, bytes });
+    retained.add(path.basename(destination));
   }
   for (const { destination, bytes } of prepared) await writeChanged(destination, bytes);
+  await writeChanged(path.join(applicationDir, 'asset-aliases.json'), Buffer.from(JSON.stringify(aliases)));
+  // Remove only generated blobs in the fixed seed directory, including earlier duplicated media.
+  for (const name of await fs.readdir(applicationDir)) {
+    if (/^[a-f0-9]{64}\.bundle$/.test(name) && !retained.has(name)) await fs.unlink(path.join(applicationDir, name));
+  }
   await writeChanged(path.join(assets, 'runtime-version.txt'), Buffer.from(release.runtimeVersion));
   await writeChanged(path.join(applicationDir, 'manifest.json'), Buffer.from(JSON.stringify(application)));
   console.log(`APK seed ready: release=${release.id}`);
