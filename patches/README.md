@@ -1,11 +1,10 @@
 # 原生依赖补丁
 
-npm ci / npm install 通过 postinstall 自动运行 patch-package；补丁改变原生实现，必须随新 APK 交付。
+npm ci / npm install 的 postinstall 自动运行 patch-package。补丁改变原生实现，必须随新 APK 交付；升级依赖时重新核对，不能仅发布 JS 包。
 
-react-native-video 6.19.3 的 Android PlayerView 默认使用 SurfaceView，ViewType.TEXTURE 不生效。现有补丁改为 TextureView 并保留重置时的最后一帧，支持 Jolly 视频随列表滚动、变换和圆角裁切。
+| 补丁 | 当前行为与约束 |
+| --- | --- |
+| react-native-video 6.19.3 | Android PlayerView 使用 TextureView，重置时保留最后一帧，支持滚动、变换与圆角裁切；影响所有视频实例，加入安全/DRM 视频前需复核 |
+| react-native-screens 4.28.0 | 页面导航栏 trait 不再写窗口，由 MainActivity 初始化透明且可见的导航栏；不改变顶部状态栏、方向与键盘处理 |
 
-补丁作用于所有 Android 视频实例。升级该库或加入安全/DRM 视频前需重新审视补丁，不能仅发布 JS 包来更新它。
-
-react-native-screens 4.28.0 的导航栏可见性默认值会在页面切换时显示系统导航。配套 APK 1.4.2 补丁统一保持导航栏可见且透明，与 MainActivity 的全屏窗口策略一致；页面选项不覆盖该全局策略。顶部状态栏、方向与键盘处理不受此补丁影响。
-
-APK 1.4.3 将导航栏颜色、透明度和可见性统一为 Activity 初始化策略；screens 的页面导航栏 trait 不再写窗口，避免路由与键盘重复切换。Compose React 根容器不处理 IME padding，键盘只由宿主 KeyboardProvider 避让。
+Compose React 根容器不添加 IME padding，键盘由宿主 KeyboardProvider 统一避让。页面选项不得重复接管全局导航栏策略。
