@@ -5,7 +5,8 @@
   "scripts": {
     "postinstall": "patch-package",
     "prepare:apk": "node tools/prepare-apk.cjs",
-    "publish:runtime": "node tools/publish-runtime.cjs"
+    "publish:runtime": "node tools/publish-runtime.cjs",
+    "publish:apk": "node tools/publish-apk.cjs"
   },
   "dependencies": {
     "@d11/react-native-fast-image": "8.13.0",

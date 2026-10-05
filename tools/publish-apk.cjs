@@ -1,0 +1,43 @@
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const { createHash } = require("node:crypto");
+const { execFileSync } = require("node:child_process");
+const { runtimeVersion } = require("./runtime-version.cjs");
+async function main() {
+  const root = path.resolve(__dirname, "..");
+  const git = args => execFileSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true }).trim();
+  if (git(["status", "--porcelain"])) throw new Error("请先提交 APK 源码再发布");
+  const commit = git(["rev-parse", "HEAD"]);
+  const edge = process.env.BUNDLE_EDGE_BASE || "https://zijinhua.297782.xyz";
+  const code = JSON.parse(await fs.readFile(path.join(root, "config/apk-version.json"), "utf8"));
+  const beforeResponse = await fetch(`${edge}/v1/apk`, { signal: AbortSignal.timeout(15000) });
+  if (!beforeResponse.ok && beforeResponse.status !== 404) throw new Error("无法核对线上 APK 版本，已停止发布");
+  const before = beforeResponse.ok ? await beforeResponse.json() : null;
+  if (before && before.versionCode >= code.versionCode) throw new Error("新 APK versionCode 必须大于线上版本");
+  execFileSync(process.execPath, [path.join(root, "tools/prepare-apk.cjs")], { cwd: root, stdio: "inherit", windowsHide: true });
+  const gradle = process.platform === "win32" ? "gradlew.bat" : "./gradlew";
+  execFileSync(gradle, [":app:assembleRelease"], { cwd: path.join(root, "android"), stdio: "inherit", shell: process.platform === "win32", windowsHide: true });
+  if (git(["status", "--porcelain"]) || git(["rev-parse", "HEAD"]) !== commit) throw new Error("构建期间源码发生改变，已停止发布");
+  const directory = path.join(root, "android/app/build/outputs/apk/release");
+  const metadata = JSON.parse(await fs.readFile(path.join(directory, "output-metadata.json"), "utf8"));
+  const artifact = metadata.elements?.[0];
+  if (metadata.applicationId !== "com.zijinhua.app" || metadata.variantName !== "release" || artifact?.versionCode !== code.versionCode || artifact?.versionName !== code.versionName || artifact.outputFile !== "app-release.apk") throw new Error("APK 构建版本不匹配");
+  const file = path.join(directory, artifact.outputFile);
+  const bytes = await fs.readFile(file);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const release = { ...code, sha256, bytes: bytes.length, runtimeVersion: runtimeVersion(root), source: { commit, dirty: false }, publishedAt: Date.now() };
+  const output = path.join(root, "dist/apk"); await fs.mkdir(output, { recursive: true });
+  const catalog = path.join(output, "apk.json"); await fs.writeFile(catalog, JSON.stringify(release));
+  const wrangler = args => execFileSync(process.platform === "win32" ? "npx.cmd" : "npx", ["wrangler", ...args], { cwd: root, stdio: "inherit", shell: process.platform === "win32", windowsHide: true });
+  wrangler(["r2", "object", "put", `zijinhua/v1/apk/${sha256}.apk`, "--file", file, "--content-type", "application/vnd.android.package-archive", "--cache-control", "public,max-age=31536000,immutable", "--remote", "--force"]);
+  // Verify the immutable file is available before moving the mutable pointer.
+  const uploaded = await fetch(`https://zjh-cdn.297782.xyz/v1/apk/${sha256}.apk`, { method: "HEAD", signal: AbortSignal.timeout(15000) });
+  if (!uploaded.ok || Number(uploaded.headers.get("content-length")) !== bytes.length) throw new Error("APK 上传核验失败，未更新清单");
+  const latestResponse = await fetch(`${edge}/v1/apk?verify=${Date.now()}`, { signal: AbortSignal.timeout(15000) });
+  if (!latestResponse.ok && latestResponse.status !== 404) throw new Error("无法核对发布基线，未更新清单");
+  const latest = latestResponse.ok ? await latestResponse.json() : null;
+  if (latest?.sha256 !== before?.sha256) throw new Error("线上 APK 已被更新，未覆盖清单");
+  wrangler(["kv", "key", "put", "v1/apk", "--path", catalog, "--namespace-id", "da19ca26504047a596afd448b36a9d6e", "--remote"]);
+  console.log(JSON.stringify({ ...release, url: `https://zjh-cdn.297782.xyz/v1/apk/${sha256}.apk` }));
+}
+main().catch(error => { console.error(error.message); process.exitCode = 1; });
