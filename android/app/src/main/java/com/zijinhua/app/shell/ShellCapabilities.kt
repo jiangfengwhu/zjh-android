@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.CancellationSignal
 import android.provider.Settings
+import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
@@ -30,6 +31,8 @@ object ShellCapabilities {
   private var permissionLauncher: ActivityResultLauncher<Array<String>>? = null
   private var pickLauncher: ActivityResultLauncher<String>? = null
   private var captureLauncher: ActivityResultLauncher<Uri>? = null
+  private var exportLauncher: ActivityResultLauncher<Intent>? = null
+  private val exportWait = AtomicReference<Waiter<Uri?>?>(null)
   private val permissionWait = AtomicReference<Waiter<Map<String, Boolean>>?>(null)
   private val pickWait = AtomicReference<Waiter<Uri?>?>(null)
   private val captureWait = AtomicReference<Waiter<Boolean>?>(null)
@@ -70,12 +73,19 @@ object ShellCapabilities {
     captureLauncher = host.registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
       captureWait.getAndSet(null)?.finish(ok)
     }
+    exportLauncher = host.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+      exportWait.getAndSet(null)?.finish(if (result.resultCode == Activity.RESULT_OK) result.data?.data else null)
+    }
     ShellHealth.attach(host)
     Log.i(TAG, "activity attached")
   }
 
   fun detach(host: ComponentActivity) {
-    if (activity === host) activity = null
+    if (activity === host) {
+      activity = null
+      pickWait.getAndSet(null)?.finish(null)
+      exportWait.getAndSet(null)?.finish(null)
+    }
   }
 
   internal fun hostActivity(): ComponentActivity? = activity
@@ -93,6 +103,7 @@ object ShellCapabilities {
     registry.register("shell", "startForeground") { payload -> startForeground(JSONObject(payload)).toString() }
     registry.register("shell", "stopForeground") { _ -> stopForeground().toString() }
     registry.register("shell", "share") { payload -> share(JSONObject(payload)).toString() }
+    registry.register("shell", "exportFile") { payload -> exportFile(JSONObject(payload)).toString() }
     registry.register("shell", "openSettings") { payload -> openSettings(JSONObject(payload)).toString() }
     registry.register("shell", "authenticate") { payload -> authenticate(JSONObject(payload)).toString() }
     registry.register("shell", "location") { payload -> location(JSONObject(payload)).toString() }
@@ -110,14 +121,14 @@ object ShellCapabilities {
     val methods = JSONArray()
     listOf(
       "capabilities", "permissions", "requestPermission", "notify", "schedule", "cancelSchedule",
-      "schedules", "startForeground", "stopForeground", "share", "openSettings", "authenticate",
+      "schedules", "startForeground", "stopForeground", "share", "exportFile", "openSettings", "authenticate",
       "location", "pick", "capturePhoto", "installPackage",
       "device", "clipboardGet", "clipboardSet", "contacts", "calendarEvents", "calendarInsert", "openUrl",
       "vibrate", "motion", "torch", "keepAwake", "speak", "fileRead", "fileWrite", "fileList",
       "healthStatus", "healthPermissions", "requestHealth", "healthSummary",
       "bluetoothState", "bluetoothDevices", "bluetoothScan", "nfcStatus", "nfcRead",
       "recordStart", "recordStop", "smsList", "smsSend", "callLog",
-      "appearance", "systemBars", "bundleReady", "loadApp", "providers", "saveProvider", "deleteProvider", "complete",
+      "appearance", "systemBars", "bundleReady", "loadApp", "providers", "saveProvider", "deleteProvider", "complete", "completeCancel",
     ).forEach { methods.put(it) }
     return JSONObject().put("ok", true).put("permissions", names).put("methods", methods)
   }
@@ -198,8 +209,29 @@ object ShellCapabilities {
       send.putExtra(Intent.EXTRA_TEXT, input.optString("text"))
     }
     send.putExtra(Intent.EXTRA_SUBJECT, input.optString("title"))
-    host.runOnUiThread { host.startActivity(Intent.createChooser(send, input.optString("title", "分享"))) }
-    return JSONObject().put("ok", true)
+    val waiter = Waiter<Boolean>()
+    host.runOnUiThread { try { host.startActivity(Intent.createChooser(send, input.optString("title", "分享"))); waiter.finish(true) } catch (_: Exception) { waiter.finish(false) } }
+    return JSONObject().put("ok", waiter.await())
+  }
+
+  private fun exportFile(input: JSONObject): JSONObject {
+    val host = activity ?: throw IllegalStateException("shell activity missing")
+    val launcher = exportLauncher ?: throw IllegalStateException("export launcher missing")
+    val file = ownedFile(host, input.getString("path"))
+    val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+      .setType(input.optString("mime", "application/octet-stream"))
+      .putExtra(Intent.EXTRA_TITLE, input.optString("name").ifBlank { file.name })
+    val waiter = Waiter<Uri?>()
+    if (!exportWait.compareAndSet(null, waiter)) return JSONObject().put("ok", false).put("error", "busy")
+    try {
+      host.runOnUiThread { try { launcher.launch(intent) } catch (_: Exception) { exportWait.getAndSet(null)?.finish(null) } }
+      val uri = waiter.await() ?: return JSONObject().put("ok", false).put("error", "cancel")
+      host.contentResolver.openOutputStream(uri, "wt").use { output ->
+        requireNotNull(output) { "document cannot be written" }
+        file.inputStream().use { it.copyTo(output) }
+      }
+      return JSONObject().put("ok", true)
+    } finally { exportWait.compareAndSet(waiter, null) }
   }
 
   private fun openSettings(input: JSONObject): JSONObject {
@@ -288,18 +320,23 @@ object ShellCapabilities {
   private fun pick(input: JSONObject): JSONObject {
     val host = activity ?: throw IllegalStateException("shell activity missing")
     val launcher = pickLauncher ?: throw IllegalStateException("pick launcher missing")
-    val mime = when (input.optString("kind", "file")) {
+    val mime = input.optString("mime").ifBlank { when (input.optString("kind", "file")) {
       "image" -> "image/*"
       "video" -> "video/*"
       "audio" -> "audio/*"
       else -> "*/*"
-    }
+    } }
     val waiter = Waiter<Uri?>()
     if (!pickWait.compareAndSet(null, waiter)) throw IllegalStateException("pick busy")
-    host.runOnUiThread { launcher.launch(mime) }
-    val uri = waiter.await() ?: return JSONObject().put("ok", false).put("error", "cancel")
-    val file = copyToCache(host, uri)
-    return JSONObject().put("ok", true).put("path", file.absolutePath).put("name", file.name)
+    try {
+      host.runOnUiThread { try { launcher.launch(mime) } catch (_: Exception) { pickWait.getAndSet(null)?.finish(null) } }
+      val uri = waiter.await() ?: return JSONObject().put("ok", false).put("error", "cancel")
+      val file = copyToCache(host, uri)
+      val name = host.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+      } ?: file.name
+      return JSONObject().put("ok", true).put("path", file.absolutePath).put("name", name)
+    } finally { pickWait.compareAndSet(waiter, null) }
   }
 
   private fun capturePhoto(): JSONObject {
@@ -335,7 +372,7 @@ object ShellCapabilities {
     val name = "pick-${System.currentTimeMillis()}"
     val file = File(activity.cacheDir, name)
     activity.contentResolver.openInputStream(uri).use { input ->
-      file.outputStream().use { output -> input?.copyTo(output) }
+      file.outputStream().use { output -> requireNotNull(input) { "document cannot be read" }.copyTo(output) }
     }
     return file
   }
@@ -345,7 +382,7 @@ object ShellCapabilities {
     val root = file.canonicalFile
     val files = activity.filesDir.canonicalFile
     val cache = activity.cacheDir.canonicalFile
-    if (!root.path.startsWith(files.path) && !root.path.startsWith(cache.path)) {
+    if (!root.path.startsWith(files.path + File.separator) && !root.path.startsWith(cache.path + File.separator)) {
       throw IllegalArgumentException("path must stay inside app storage")
     }
     if (!root.isFile) throw IllegalArgumentException("file missing")

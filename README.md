@@ -22,7 +22,7 @@ cd android
 
 Windows 使用 gradlew.bat。输出 android/app/build/outputs/apk/release/app-release.apk，使用 `adb install -r <apk>` 覆盖安装并保留数据。
 
-prepare:apk 下载线上宿主 vendor/app 并校验哈希与运行时契约，保留 Jolly 公开版本作为离线 seed。seed 中与宿主一致的视频按哈希复用同一资源，不重复打包，并清理已过期 seed 文件。
+prepare:apk 下载线上宿主 vendor/app 并校验哈希与运行时契约，不内置 plugin 应用。Jolly 制作进度页及视频属于宿主；准备资源时清理旧 Jolly 应用 seed。
 
 Release 开启 R8 代码与资源裁剪、内置 bundle 压缩；独立 DEX 插件使用的公共桥接类型保留名称与成员。原生共享库保持直接加载，不以安装后额外解压换取下载体积。
 

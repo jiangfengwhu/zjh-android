@@ -10,8 +10,17 @@ import java.net.URL
 import java.net.SocketTimeoutException
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 object ShellAi {
+  private class RequestState {
+    val cancelled = AtomicBoolean(false)
+    @Volatile var connection: HttpURLConnection? = null
+    @Volatile var started = false
+    val createdAt = System.currentTimeMillis()
+  }
+  private val requests = ConcurrentHashMap<String, RequestState>()
   private const val TAG = "ShellAi"
   private const val PREFS = "zijinhua.shell.user"
   private const val KEY_MODE = "appearance"
@@ -38,6 +47,7 @@ object ShellAi {
     registry.register("shell", "saveProvider") { payload -> saveProvider(app, JSONObject(payload)).toString() }
     registry.register("shell", "deleteProvider") { payload -> deleteProvider(app, JSONObject(payload)).toString() }
     registry.register("shell", "complete") { payload -> complete(app, JSONObject(payload)).toString() }
+    registry.register("shell", "completeCancel") { payload -> cancel(JSONObject(payload).getString("requestId")).toString() }
   }
 
   fun restore(context: Context) {
@@ -161,7 +171,32 @@ object ShellAi {
     return JSONObject().put("ok", true)
   }
 
-  private fun complete(context: Context, input: JSONObject): JSONObject {
+  fun cancel(requestId: String): JSONObject {
+    require(requestId.matches(Regex("[A-Za-z0-9._-]{1,180}"))) { "invalid request ID" }
+    requests.entries.removeIf { !it.value.started && System.currentTimeMillis() - it.value.createdAt > 30000 }
+    if (requests.size >= 128 && !requests.containsKey(requestId)) return failure("BUSY", "请求过多")
+    val state = requests.computeIfAbsent(requestId) { RequestState() }
+    state.cancelled.set(true)
+    state.connection?.disconnect()
+    return JSONObject().put("ok", true)
+  }
+
+  fun complete(context: Context, input: JSONObject, emit: (String) -> Unit = {}): JSONObject {
+    val id = input.optString("requestId").ifBlank { UUID.randomUUID().toString() }
+    if (!id.matches(Regex("[A-Za-z0-9._-]{1,180}"))) return failure("INVALID_REQUEST", "请求 ID 无效")
+    requests.entries.removeIf { !it.value.started && System.currentTimeMillis() - it.value.createdAt > 30000 }
+    if (requests.size >= 128) return failure("BUSY", "请求过多")
+    val state = requests.computeIfAbsent(id) { RequestState() }
+    synchronized(state) {
+      if (state.started) return failure("BUSY", "请求已在处理中")
+      state.started = true
+    }
+    return try {
+      if (state.cancelled.get()) failure("CANCELLED", "已取消生成") else completeRequest(context, input, state, emit)
+    } finally { state.connection?.disconnect(); requests.remove(id, state) }
+  }
+
+  private fun completeRequest(context: Context, input: JSONObject, state: RequestState, emit: (String) -> Unit): JSONObject {
     val items = readProviders(context)
     val wanted = input.optString("providerId")
     var provider: JSONObject? = null
@@ -188,7 +223,8 @@ object ShellAi {
     val maxTokens = input.optDouble("maxTokens", 2048.0)
     if (!temperature.isFinite() || temperature !in 0.0..2.0 || !maxTokens.isFinite() || maxTokens !in 1.0..8192.0 || maxTokens % 1.0 != 0.0) return failure("INVALID_REQUEST", "AI 生成参数无效")
     val endpoint = endpoint(chosen.getString("baseUrl"))
-    val body = JSONObject().put("model", model).put("messages", messages).put("stream", false)
+    val streaming = input.optBoolean("stream")
+    val body = JSONObject().put("model", model).put("messages", messages).put("stream", streaming)
     if (input.has("temperature")) body.put("temperature", temperature)
     if (input.has("maxTokens")) body.put("max_tokens", maxTokens.toInt())
     var connection: HttpURLConnection? = null
@@ -203,6 +239,8 @@ object ShellAi {
       setRequestProperty("Authorization", "Bearer ${chosen.optString("apiKey")}")
       }
       connection = request
+      state.connection = request
+      if (state.cancelled.get()) return failure("CANCELLED", "已取消生成")
       request.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
       val code = request.responseCode
       if (code !in 200..299) {
@@ -215,21 +253,21 @@ object ShellAi {
         }
       } else {
         val text = request.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+          if (streaming) return@use AiTextStream.read(reader, { state.cancelled.get() }, emit)
           val result = StringBuilder(); val buffer = CharArray(8192)
-          while (true) { val size = reader.read(buffer); if (size < 0) break; result.append(buffer, 0, size); if (result.length > 2 * 1024 * 1024) return failure("INVALID_RESPONSE", "模型响应过大，请减少输出长度") }
+          while (true) { if (state.cancelled.get()) return failure("CANCELLED", "已取消生成"); val size = reader.read(buffer); if (size < 0) break; result.append(buffer, 0, size); if (result.length > 2 * 1024 * 1024) return failure("INVALID_RESPONSE", "模型响应过大，请减少输出长度") }
           result.toString()
         }
-        val message = JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
-        val content = message?.opt("content") as? String
+        val content = if (streaming) text else JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.opt("content") as? String
         if (content.isNullOrBlank()) failure("INVALID_RESPONSE", "模型未返回可用文本，请重试")
         else JSONObject().put("ok", true).put("text", content).put("providerId", chosen.getString("id")).put("model", model)
       }
     } catch (_: SocketTimeoutException) {
-      failure("TIMEOUT", "AI 响应超时，请稍后重试")
+      if (state.cancelled.get()) failure("CANCELLED", "已取消生成") else failure("TIMEOUT", "AI 响应超时，请稍后重试")
     } catch (_: IOException) {
-      failure("NETWORK_ERROR", "无法连接 AI 引擎，请检查网络和模型地址")
+      if (state.cancelled.get()) failure("CANCELLED", "已取消生成") else failure("NETWORK_ERROR", "无法连接 AI 引擎，请检查网络和模型地址")
     } catch (error: Exception) {
-      failure("INVALID_RESPONSE", "AI 引擎返回的数据格式不兼容")
+      if (state.cancelled.get()) failure("CANCELLED", "已取消生成") else failure("INVALID_RESPONSE", "AI 引擎返回的数据格式不兼容或流式连接中断")
     } finally {
       connection?.disconnect()
     }

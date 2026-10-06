@@ -1,5 +1,5 @@
 {
-  "sdk": "2.0.0",
+  "sdk": "2.1.0",
   "shared": [
     "@d11/react-native-fast-image",
     "@gorhom/bottom-sheet",
