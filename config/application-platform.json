@@ -1,5 +1,5 @@
 {
-  "sdk": "2.1.0",
+  "sdk": "2.2.0",
   "shared": [
     "@d11/react-native-fast-image",
     "@gorhom/bottom-sheet",
@@ -45,6 +45,7 @@
     "react/jsx-runtime",
     "react/jsx-dev-runtime",
     "react-native-enriched-markdown",
-    "react-native-nitro-web-image"
+    "react-native-nitro-web-image",
+    "tamagui"
   ]
 }
