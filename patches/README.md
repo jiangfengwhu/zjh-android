@@ -4,6 +4,7 @@ npm ci / npm install 的 postinstall 自动运行 patch-package。补丁改变�
 
 | 补丁 | 当前行为与约束 |
 | --- | --- |
+| react-native-gifted-charts 1.4.78 | 渐变使用现有 Skia，保留颜色、位置和起止点参数；不再依赖 Linear Gradient 或 Expo，升级时核对柱状图渐变及尺寸变化 |
 | react-native-video 6.19.3 | Android PlayerView 使用 TextureView，重置时保留最后一帧，支持滚动、变换与圆角裁切；影响所有视频实例，加入安全/DRM 视频前需复核 |
 | react-native-screens 4.28.0 | 页面导航栏 trait 不再写窗口，由 MainActivity 初始化透明且可见的导航栏；不改变顶部状态栏、方向与键盘处理 |
 

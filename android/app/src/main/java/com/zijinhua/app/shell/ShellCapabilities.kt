@@ -28,20 +28,14 @@ object ShellCapabilities {
   private const val TAG = "ShellCapabilities"
   private var activity: ComponentActivity? = null
   private var pickLauncher: ActivityResultLauncher<String>? = null
-  private var captureLauncher: ActivityResultLauncher<Uri>? = null
   private var exportLauncher: ActivityResultLauncher<Intent>? = null
   private val exportWait = AtomicReference<Waiter<Uri?>?>(null)
   private val pickWait = AtomicReference<Waiter<Uri?>?>(null)
-  private val captureWait = AtomicReference<Waiter<Boolean>?>(null)
-  private var captureFile: File? = null
 
   fun attach(host: ComponentActivity) {
     activity = host
     pickLauncher = host.registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
       pickWait.getAndSet(null)?.finish(uri)
-    }
-    captureLauncher = host.registerForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-      captureWait.getAndSet(null)?.finish(ok)
     }
     exportLauncher = host.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
       exportWait.getAndSet(null)?.finish(if (result.resultCode == Activity.RESULT_OK) result.data?.data else null)
@@ -68,14 +62,11 @@ object ShellCapabilities {
     registry.register("shell", "schedule") { payload -> schedule(JSONObject(payload)).toString() }
     registry.register("shell", "cancelSchedule") { payload -> cancelSchedule(JSONObject(payload)).toString() }
     registry.register("shell", "schedules") { _ -> schedules().toString() }
-    registry.register("shell", "startForeground") { payload -> startForeground(JSONObject(payload)).toString() }
-    registry.register("shell", "stopForeground") { _ -> stopForeground().toString() }
     registry.register("shell", "share") { payload -> share(JSONObject(payload)).toString() }
     registry.register("shell", "exportFile") { payload -> exportFile(JSONObject(payload)).toString() }
     registry.register("shell", "authenticate") { payload -> authenticate(JSONObject(payload)).toString() }
     registry.register("shell", "location") { payload -> location(JSONObject(payload)).toString() }
     registry.register("shell", "pick") { payload -> pick(JSONObject(payload)).toString() }
-    registry.register("shell", "capturePhoto") { _ -> capturePhoto().toString() }
     registry.register("shell", "installPackage") { payload -> installPackage(JSONObject(payload)).toString() }
   }
 
@@ -86,9 +77,9 @@ object ShellCapabilities {
     val methods = JSONArray()
     listOf(
       "capabilities", "notify", "schedule", "cancelSchedule",
-      "schedules", "startForeground", "stopForeground", "share", "exportFile", "authenticate",
-      "location", "pick", "capturePhoto", "installPackage",
-      "device", "clipboardGet", "clipboardSet", "contacts", "calendarEvents", "calendarInsert", "openUrl",
+      "schedules", "share", "exportFile", "authenticate",
+      "location", "pick", "installPackage",
+      "device", "contacts", "calendarEvents", "calendarInsert", "openUrl",
       "motion", "torch", "keepAwake", "speak",
       "healthStatus", "healthPermissions", "requestHealth", "healthSummary",
       "bluetoothState", "bluetoothDevices", "bluetoothScan", "nfcStatus", "nfcRead",
@@ -120,18 +111,6 @@ object ShellCapabilities {
   }
 
   private fun schedules(): JSONObject = ShellAlarms.list(appContext())
-
-  private fun startForeground(input: JSONObject): JSONObject {
-    val context = appContext()
-    val type = input.optString("type", "dataSync")
-    ShellForegroundService.start(context, input.optString("title", "紫金花"), input.optString("body"), type)
-    return JSONObject().put("ok", true).put("type", type)
-  }
-
-  private fun stopForeground(): JSONObject {
-    ShellForegroundService.stop(appContext())
-    return JSONObject().put("ok", true)
-  }
 
   private fun share(input: JSONObject): JSONObject {
     val host = activity ?: throw IllegalStateException("shell activity missing")
@@ -243,12 +222,7 @@ object ShellCapabilities {
   private fun pick(input: JSONObject): JSONObject {
     val host = activity ?: throw IllegalStateException("shell activity missing")
     val launcher = pickLauncher ?: throw IllegalStateException("pick launcher missing")
-    val mime = input.optString("mime").ifBlank { when (input.optString("kind", "file")) {
-      "image" -> "image/*"
-      "video" -> "video/*"
-      "audio" -> "audio/*"
-      else -> "*/*"
-    } }
+    val mime = input.optString("mime").ifBlank { "*/*" }
     val waiter = Waiter<Uri?>()
     if (!pickWait.compareAndSet(null, waiter)) throw IllegalStateException("pick busy")
     try {
@@ -260,23 +234,6 @@ object ShellCapabilities {
       } ?: file.name
       return JSONObject().put("ok", true).put("path", file.absolutePath).put("name", name)
     } finally { pickWait.compareAndSet(waiter, null) }
-  }
-
-  private fun capturePhoto(): JSONObject {
-    val host = activity ?: throw IllegalStateException("shell activity missing")
-    if (!granted(host, Manifest.permission.CAMERA)) {
-      return JSONObject().put("ok", false).put("error", "permission")
-    }
-    val launcher = captureLauncher ?: throw IllegalStateException("capture launcher missing")
-    val file = File(host.cacheDir, "capture-${System.currentTimeMillis()}.jpg")
-    captureFile = file
-    val uri = FileProvider.getUriForFile(host, "${host.packageName}.fileprovider", file)
-    val waiter = Waiter<Boolean>()
-    if (!captureWait.compareAndSet(null, waiter)) throw IllegalStateException("capture busy")
-    host.runOnUiThread { launcher.launch(uri) }
-    val ok = waiter.await()
-    if (!ok) return JSONObject().put("ok", false).put("error", "cancel")
-    return JSONObject().put("ok", true).put("path", file.absolutePath)
   }
 
   private fun installPackage(input: JSONObject): JSONObject {

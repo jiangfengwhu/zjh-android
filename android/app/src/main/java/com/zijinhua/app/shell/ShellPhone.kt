@@ -1,7 +1,5 @@
 package com.zijinhua.app.shell
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -33,8 +31,6 @@ object ShellPhone {
 
   fun register(registry: PluginRegistry) {
     registry.register("shell", "device") { _ -> device().toString() }
-    registry.register("shell", "clipboardGet") { _ -> clipboardGet().toString() }
-    registry.register("shell", "clipboardSet") { payload -> clipboardSet(JSONObject(payload)).toString() }
     registry.register("shell", "contacts") { payload -> contacts(JSONObject(payload.ifBlank { "{}" })).toString() }
     registry.register("shell", "calendarEvents") { payload -> calendarEvents(JSONObject(payload)).toString() }
     registry.register("shell", "calendarInsert") { payload -> calendarInsert(JSONObject(payload)).toString() }
@@ -67,19 +63,6 @@ object ShellPhone {
       .put("release", Build.VERSION.RELEASE)
       .put("battery", percent)
       .put("charging", charging)
-  }
-
-  private fun clipboardGet(): JSONObject {
-    val manager = context().getSystemService(ClipboardManager::class.java)
-    val text = manager?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context())?.toString() ?: ""
-    return JSONObject().put("ok", true).put("text", text)
-  }
-
-  private fun clipboardSet(input: JSONObject): JSONObject {
-    val manager = context().getSystemService(ClipboardManager::class.java)
-      ?: return JSONObject().put("ok", false).put("error", "clipboard")
-    manager.setPrimaryClip(ClipData.newPlainText("zijinhua", input.optString("text")))
-    return JSONObject().put("ok", true)
   }
 
   private fun contacts(input: JSONObject): JSONObject {

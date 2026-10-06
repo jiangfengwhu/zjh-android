@@ -106,10 +106,6 @@
         android:exported="false"
         android:stopWithTask="true"
         android:foregroundServiceType="microphone" />
-      <service
-        android:name=".shell.ShellForegroundService"
-        android:exported="false"
-        android:foregroundServiceType="dataSync|mediaPlayback|location|camera|microphone|connectedDevice" />
       <provider
         android:name="androidx.core.content.FileProvider"
         android:authorities="${applicationId}.fileprovider"
