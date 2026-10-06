@@ -1,15 +1,9 @@
 {
-  "sdk": "2.2.0",
+  "sdk": "3.0.0",
   "shared": [
-    "@d11/react-native-fast-image",
-    "@gorhom/bottom-sheet",
-    "@react-native-clipboard/clipboard",
     "@react-native-community/blur",
     "@react-native-community/datetimepicker",
     "@react-native-community/netinfo",
-    "@react-native-community/slider",
-    "@react-native-documents/picker",
-    "@react-native-picker/picker",
     "@react-navigation/material-top-tabs",
     "@react-navigation/native",
     "@react-navigation/native-stack",
@@ -24,11 +18,9 @@
     "react-native-calendars",
     "react-native-gesture-handler",
     "react-native-gifted-charts",
-    "react-native-haptic-feedback",
     "react-native-image-crop-picker",
     "react-native-keyboard-controller",
     "react-native-linear-gradient",
-    "react-native-markdown-display",
     "react-native-nitro-image",
     "react-native-pager-view",
     "react-native-pdf",
@@ -46,6 +38,8 @@
     "react/jsx-dev-runtime",
     "react-native-enriched-markdown",
     "react-native-nitro-web-image",
-    "tamagui"
+    "tamagui",
+    "react-hook-form",
+    "@tanstack/react-query"
   ]
 }
