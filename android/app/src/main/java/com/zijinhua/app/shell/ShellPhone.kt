@@ -15,9 +15,6 @@ import android.hardware.camera2.CameraManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
-import android.os.VibrationEffect
-import android.os.Vibrator
-import android.os.VibratorManager
 import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.speech.tts.TextToSpeech
@@ -27,7 +24,6 @@ import androidx.core.content.ContextCompat
 import com.zijinhua.app.plugin.PluginRegistry
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -43,11 +39,7 @@ object ShellPhone {
     registry.register("shell", "calendarEvents") { payload -> calendarEvents(JSONObject(payload)).toString() }
     registry.register("shell", "calendarInsert") { payload -> calendarInsert(JSONObject(payload)).toString() }
     registry.register("shell", "openUrl") { payload -> openUrl(JSONObject(payload)).toString() }
-    registry.register("shell", "vibrate") { payload -> vibrate(JSONObject(payload.ifBlank { "{}" })).toString() }
     registry.register("shell", "motion") { _ -> motion().toString() }
-    registry.register("shell", "fileRead") { payload -> fileRead(JSONObject(payload)).toString() }
-    registry.register("shell", "fileWrite") { payload -> fileWrite(JSONObject(payload)).toString() }
-    registry.register("shell", "fileList") { payload -> fileList(JSONObject(payload.ifBlank { "{}" })).toString() }
     registry.register("shell", "torch") { payload -> torch(JSONObject(payload)).toString() }
     registry.register("shell", "keepAwake") { payload -> keepAwake(JSONObject(payload)).toString() }
     registry.register("shell", "speak") { payload -> speak(JSONObject(payload)).toString() }
@@ -207,19 +199,6 @@ object ShellPhone {
     return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
   }
 
-  private fun vibrate(input: JSONObject): JSONObject {
-    val context = context()
-    val ms = input.optLong("ms", 40).coerceIn(1, 2000)
-    val vibrator = if (Build.VERSION.SDK_INT >= 31) {
-      context.getSystemService(VibratorManager::class.java).defaultVibrator
-    } else {
-      @Suppress("DEPRECATION")
-      context.getSystemService(Vibrator::class.java)
-    } ?: return JSONObject().put("ok", false).put("error", "vibrator")
-    vibrator.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE))
-    return JSONObject().put("ok", true).put("ms", ms)
-  }
-
   private fun motion(): JSONObject {
     val manager = context().getSystemService(SensorManager::class.java)
       ?: return JSONObject().put("ok", false).put("error", "sensor")
@@ -287,42 +266,4 @@ object ShellPhone {
     return created
   }
 
-  private fun fileRead(input: JSONObject): JSONObject {
-    val file = userFile(input.getString("path"))
-    if (!file.isFile) return JSONObject().put("ok", false).put("error", "missing")
-    if (file.length() > 200_000) return JSONObject().put("ok", false).put("error", "too large")
-    return JSONObject().put("ok", true).put("text", file.readText())
-  }
-
-  private fun fileWrite(input: JSONObject): JSONObject {
-    val text = input.optString("text")
-    if (text.length > 200_000) return JSONObject().put("ok", false).put("error", "too large")
-    val file = userFile(input.getString("path"))
-    file.parentFile?.mkdirs()
-    file.writeText(text)
-    Log.i(TAG, "file write bytes=${file.length()}")
-    return JSONObject().put("ok", true).put("bytes", file.length())
-  }
-
-  private fun fileList(input: JSONObject): JSONObject {
-    val dir = userFile(input.optString("path"))
-    if (!dir.exists()) dir.mkdirs()
-    if (!dir.isDirectory) return JSONObject().put("ok", false).put("error", "not a directory")
-    val items = JSONArray()
-    dir.listFiles()?.sortedBy { it.name }?.take(80)?.forEach { child ->
-      items.put(JSONObject().put("name", child.name).put("dir", child.isDirectory).put("bytes", child.length()))
-    }
-    return JSONObject().put("ok", true).put("items", items)
-  }
-
-  private fun userFile(relative: String): File {
-    val root = File(context().filesDir, "user").canonicalFile
-    root.mkdirs()
-    val cleaned = relative.trim().trimStart('/', '\\')
-    val file = File(root, if (cleaned.isEmpty()) "." else cleaned).canonicalFile
-    if (file != root && !file.path.startsWith(root.path + File.separator)) {
-      throw IllegalArgumentException("path")
-    }
-    return file
-  }
 }

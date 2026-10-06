@@ -28,45 +28,16 @@ import java.util.concurrent.atomic.AtomicReference
 object ShellCapabilities {
   private const val TAG = "ShellCapabilities"
   private var activity: ComponentActivity? = null
-  private var permissionLauncher: ActivityResultLauncher<Array<String>>? = null
   private var pickLauncher: ActivityResultLauncher<String>? = null
   private var captureLauncher: ActivityResultLauncher<Uri>? = null
   private var exportLauncher: ActivityResultLauncher<Intent>? = null
   private val exportWait = AtomicReference<Waiter<Uri?>?>(null)
-  private val permissionWait = AtomicReference<Waiter<Map<String, Boolean>>?>(null)
   private val pickWait = AtomicReference<Waiter<Uri?>?>(null)
   private val captureWait = AtomicReference<Waiter<Boolean>?>(null)
   private var captureFile: File? = null
 
-  private val aliases = mapOf(
-    "notifications" to Manifest.permission.POST_NOTIFICATIONS,
-    "camera" to Manifest.permission.CAMERA,
-    "microphone" to Manifest.permission.RECORD_AUDIO,
-    "location" to Manifest.permission.ACCESS_FINE_LOCATION,
-    "locationCoarse" to Manifest.permission.ACCESS_COARSE_LOCATION,
-    "locationBackground" to Manifest.permission.ACCESS_BACKGROUND_LOCATION,
-    "photos" to Manifest.permission.READ_MEDIA_IMAGES,
-    "videos" to Manifest.permission.READ_MEDIA_VIDEO,
-    "audio" to Manifest.permission.READ_MEDIA_AUDIO,
-    "contacts" to Manifest.permission.READ_CONTACTS,
-    "contactsWrite" to Manifest.permission.WRITE_CONTACTS,
-    "calendar" to Manifest.permission.READ_CALENDAR,
-    "calendarWrite" to Manifest.permission.WRITE_CALENDAR,
-    "activity" to Manifest.permission.ACTIVITY_RECOGNITION,
-    "bluetooth" to Manifest.permission.BLUETOOTH_CONNECT,
-    "bluetoothScan" to Manifest.permission.BLUETOOTH_SCAN,
-    "bluetoothAdvertise" to Manifest.permission.BLUETOOTH_ADVERTISE,
-    "phone" to Manifest.permission.CALL_PHONE,
-    "sms" to Manifest.permission.READ_SMS,
-    "smsSend" to Manifest.permission.SEND_SMS,
-    "callLog" to Manifest.permission.READ_CALL_LOG,
-  )
-
   fun attach(host: ComponentActivity) {
     activity = host
-    permissionLauncher = host.registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
-      permissionWait.getAndSet(null)?.finish(granted)
-    }
     pickLauncher = host.registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
       pickWait.getAndSet(null)?.finish(uri)
     }
@@ -94,8 +65,6 @@ object ShellCapabilities {
 
   fun register(registry: PluginRegistry) {
     registry.register("shell", "capabilities") { _ -> capabilities().toString() }
-    registry.register("shell", "permissions") { _ -> permissions().toString() }
-    registry.register("shell", "requestPermission") { payload -> requestPermission(JSONObject(payload)).toString() }
     registry.register("shell", "notify") { payload -> notify(JSONObject(payload)).toString() }
     registry.register("shell", "schedule") { payload -> schedule(JSONObject(payload)).toString() }
     registry.register("shell", "cancelSchedule") { payload -> cancelSchedule(JSONObject(payload)).toString() }
@@ -116,47 +85,19 @@ object ShellCapabilities {
     ?: throw IllegalStateException("shell activity missing")
 
   private fun capabilities(): JSONObject {
-    val names = JSONArray()
-    aliases.keys.sorted().forEach { names.put(it) }
     val methods = JSONArray()
     listOf(
-      "capabilities", "permissions", "requestPermission", "notify", "schedule", "cancelSchedule",
+      "capabilities", "notify", "schedule", "cancelSchedule",
       "schedules", "startForeground", "stopForeground", "share", "exportFile", "openSettings", "authenticate",
       "location", "pick", "capturePhoto", "installPackage",
       "device", "clipboardGet", "clipboardSet", "contacts", "calendarEvents", "calendarInsert", "openUrl",
-      "vibrate", "motion", "torch", "keepAwake", "speak", "fileRead", "fileWrite", "fileList",
+      "motion", "torch", "keepAwake", "speak",
       "healthStatus", "healthPermissions", "requestHealth", "healthSummary",
       "bluetoothState", "bluetoothDevices", "bluetoothScan", "nfcStatus", "nfcRead",
       "smsList", "smsSend", "callLog",
       "appearance", "systemBars", "bundleReady", "loadApp", "providers", "saveProvider", "deleteProvider", "complete", "completeCancel",
     ).forEach { methods.put(it) }
-    return JSONObject().put("ok", true).put("permissions", names).put("methods", methods)
-  }
-
-  private fun permissions(): JSONObject {
-    val context = appContext()
-    val items = JSONObject()
-    aliases.forEach { (name, permission) ->
-      items.put(name, granted(context, permission))
-    }
-    return JSONObject().put("ok", true).put("items", items)
-  }
-
-  private fun requestPermission(input: JSONObject): JSONObject {
-    val name = input.getString("name")
-    val permission = aliases[name] ?: throw IllegalArgumentException("unknown permission $name")
-    val host = activity ?: throw IllegalStateException("shell activity missing")
-    if (granted(host, permission)) {
-      return JSONObject().put("ok", true).put("name", name).put("granted", true)
-    }
-    val launcher = permissionLauncher ?: throw IllegalStateException("permission launcher missing")
-    val waiter = Waiter<Map<String, Boolean>>()
-    if (!permissionWait.compareAndSet(null, waiter)) throw IllegalStateException("permission request busy")
-    host.runOnUiThread { launcher.launch(arrayOf(permission)) }
-    val result = waiter.await()
-    val ok = result[permission] == true
-    Log.i(TAG, "permission $name granted=$ok")
-    return JSONObject().put("ok", true).put("name", name).put("granted", ok)
+    return JSONObject().put("ok", true).put("methods", methods)
   }
 
   private fun notify(input: JSONObject): JSONObject {

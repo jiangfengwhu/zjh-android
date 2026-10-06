@@ -1,5 +1,5 @@
 {
-  "sdk": "4.0.0",
+  "sdk": "5.0.0",
   "shared": [
     "@react-native-community/blur",
     "@react-native-community/datetimepicker",
@@ -40,6 +40,7 @@
     "react-hook-form",
     "@tanstack/react-query",
     "react-native-audio-api",
-    "react-native-vision-camera-barcode-scanner"
+    "react-native-vision-camera-barcode-scanner",
+    "react-native-permissions"
   ]
 }
