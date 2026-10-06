@@ -9,7 +9,6 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.CancellationSignal
-import android.provider.Settings
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -73,7 +72,6 @@ object ShellCapabilities {
     registry.register("shell", "stopForeground") { _ -> stopForeground().toString() }
     registry.register("shell", "share") { payload -> share(JSONObject(payload)).toString() }
     registry.register("shell", "exportFile") { payload -> exportFile(JSONObject(payload)).toString() }
-    registry.register("shell", "openSettings") { payload -> openSettings(JSONObject(payload)).toString() }
     registry.register("shell", "authenticate") { payload -> authenticate(JSONObject(payload)).toString() }
     registry.register("shell", "location") { payload -> location(JSONObject(payload)).toString() }
     registry.register("shell", "pick") { payload -> pick(JSONObject(payload)).toString() }
@@ -88,7 +86,7 @@ object ShellCapabilities {
     val methods = JSONArray()
     listOf(
       "capabilities", "notify", "schedule", "cancelSchedule",
-      "schedules", "startForeground", "stopForeground", "share", "exportFile", "openSettings", "authenticate",
+      "schedules", "startForeground", "stopForeground", "share", "exportFile", "authenticate",
       "location", "pick", "capturePhoto", "installPackage",
       "device", "clipboardGet", "clipboardSet", "contacts", "calendarEvents", "calendarInsert", "openUrl",
       "motion", "torch", "keepAwake", "speak",
@@ -173,22 +171,6 @@ object ShellCapabilities {
       }
       return JSONObject().put("ok", true)
     } finally { exportWait.compareAndSet(waiter, null) }
-  }
-
-  private fun openSettings(input: JSONObject): JSONObject {
-    val host = activity ?: throw IllegalStateException("shell activity missing")
-    val target = input.optString("target", "app")
-    val intent = when (target) {
-      "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-        .putExtra(Settings.EXTRA_APP_PACKAGE, host.packageName)
-      "exactAlarms" -> Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
-        .setData(Uri.parse("package:${host.packageName}"))
-      else -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-        .setData(Uri.parse("package:${host.packageName}"))
-    }
-    host.runOnUiThread { host.startActivity(intent) }
-    Log.i(TAG, "open settings $target")
-    return JSONObject().put("ok", true).put("target", target)
   }
 
   private fun authenticate(input: JSONObject): JSONObject {
