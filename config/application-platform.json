@@ -1,5 +1,5 @@
 {
-  "sdk": "3.0.0",
+  "sdk": "4.0.0",
   "shared": [
     "@react-native-community/blur",
     "@react-native-community/datetimepicker",
@@ -20,7 +20,6 @@
     "react-native-gifted-charts",
     "react-native-image-crop-picker",
     "react-native-keyboard-controller",
-    "react-native-linear-gradient",
     "react-native-nitro-image",
     "react-native-pager-view",
     "react-native-pdf",
@@ -38,8 +37,9 @@
     "react/jsx-dev-runtime",
     "react-native-enriched-markdown",
     "react-native-nitro-web-image",
-    "tamagui",
     "react-hook-form",
-    "@tanstack/react-query"
+    "@tanstack/react-query",
+    "react-native-audio-api",
+    "react-native-vision-camera-barcode-scanner"
   ]
 }

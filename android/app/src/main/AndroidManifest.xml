@@ -102,6 +102,11 @@
         </intent-filter>
       </receiver>
       <service
+        android:name="com.swmansion.audioapi.system.CentralizedForegroundService"
+        android:exported="false"
+        android:stopWithTask="true"
+        android:foregroundServiceType="microphone" />
+      <service
         android:name=".shell.ShellForegroundService"
         android:exported="false"
         android:foregroundServiceType="dataSync|mediaPlayback|location|camera|microphone|connectedDevice" />

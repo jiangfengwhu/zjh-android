@@ -127,7 +127,7 @@ object ShellCapabilities {
       "vibrate", "motion", "torch", "keepAwake", "speak", "fileRead", "fileWrite", "fileList",
       "healthStatus", "healthPermissions", "requestHealth", "healthSummary",
       "bluetoothState", "bluetoothDevices", "bluetoothScan", "nfcStatus", "nfcRead",
-      "recordStart", "recordStop", "smsList", "smsSend", "callLog",
+      "smsList", "smsSend", "callLog",
       "appearance", "systemBars", "bundleReady", "loadApp", "providers", "saveProvider", "deleteProvider", "complete", "completeCancel",
     ).forEach { methods.put(it) }
     return JSONObject().put("ok", true).put("permissions", names).put("methods", methods)

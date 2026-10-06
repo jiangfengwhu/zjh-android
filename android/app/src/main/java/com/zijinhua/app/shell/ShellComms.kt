@@ -2,7 +2,6 @@ package com.zijinhua.app.shell
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.media.MediaRecorder
 import android.os.Build
 import android.provider.CallLog
 import android.provider.Telephony
@@ -12,76 +11,14 @@ import androidx.core.content.ContextCompat
 import com.zijinhua.app.plugin.PluginRegistry
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 object ShellComms {
   private const val TAG = "ShellComms"
-  private var recorder: MediaRecorder? = null
-  private var recording: File? = null
-  private var startedAt = 0L
 
   fun register(registry: PluginRegistry) {
-    registry.register("shell", "recordStart") { _ -> recordStart().toString() }
-    registry.register("shell", "recordStop") { _ -> recordStop().toString() }
     registry.register("shell", "smsList") { payload -> smsList(JSONObject(payload.ifBlank { "{}" })).toString() }
     registry.register("shell", "smsSend") { payload -> smsSend(JSONObject(payload)).toString() }
     registry.register("shell", "callLog") { payload -> callLog(JSONObject(payload.ifBlank { "{}" })).toString() }
-  }
-
-  private fun recordStart(): JSONObject {
-    val context = ShellCapabilities.hostContext()
-    if (!granted(context, Manifest.permission.RECORD_AUDIO)) {
-      return JSONObject().put("ok", false).put("error", "permission")
-    }
-    if (recorder != null) return JSONObject().put("ok", false).put("error", "busy")
-    val dir = File(context.filesDir, "user/recordings")
-    dir.mkdirs()
-    val file = File(dir, "rec-${System.currentTimeMillis()}.m4a")
-    val created = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(context) else {
-      @Suppress("DEPRECATION")
-      MediaRecorder()
-    }
-    try {
-      created.setAudioSource(MediaRecorder.AudioSource.MIC)
-      created.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-      created.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-      created.setAudioSamplingRate(44100)
-      created.setAudioEncodingBitRate(96000)
-      created.setOutputFile(file.absolutePath)
-      created.prepare()
-      created.start()
-    } catch (error: Exception) {
-      created.release()
-      file.delete()
-      Log.i(TAG, "record start failed ${error.message}")
-      return JSONObject().put("ok", false).put("error", "recorder")
-    }
-    recorder = created
-    recording = file
-    startedAt = System.currentTimeMillis()
-    Log.i(TAG, "record started")
-    return JSONObject().put("ok", true).put("path", file.absolutePath)
-  }
-
-  private fun recordStop(): JSONObject {
-    val created = recorder ?: return JSONObject().put("ok", false).put("error", "idle")
-    val file = recording
-    recorder = null
-    recording = null
-    try {
-      created.stop()
-    } catch (error: Exception) {
-      Log.i(TAG, "record stop ${error.message}")
-    } finally {
-      created.release()
-    }
-    val ms = System.currentTimeMillis() - startedAt
-    Log.i(TAG, "record stopped ms=$ms bytes=${file?.length() ?: 0}")
-    return JSONObject()
-      .put("ok", true)
-      .put("path", file?.absolutePath ?: "")
-      .put("bytes", file?.length() ?: 0L)
-      .put("ms", ms)
   }
 
   private fun smsList(input: JSONObject): JSONObject {
