@@ -55,8 +55,21 @@ Release 冷启动由 Application 启动 ShellStartup 后台任务：执行 prepa
 
 准备失败或 app 包加载失败时退出启动图并显示原生恢复页；启动 30 秒仍未收到 bundleReady 时也显示恢复页，可重试或返回。准备失败重试重新执行准备任务，已有 RN 容器时重试重载 ReactHost；失败展示不会清除 boot.pending，成功仍由 bundleReady 确认。syncPlugins 保留兼容入口，当前版本已经在启动时注册，不重复加载同一份 DEX；显式重载或激活新版本才重新注册。
 
-原生 ReleaseCheck 仍由 WorkManager 每 30 分钟检查并暂存动态包；它与宿主页面的手动刷新、APK 安装流程分开。原生补丁及升级注意事项见 [patches/README.md](patches/README.md)。
+原生 ReleaseCheck 仍由 WorkManager 每 30 分钟检查并暂存动态包；它与宿主页面的手动刷新、APK 安装流程分开。原生补丁及升级注意事项见下文。
+
+启动性能使用 Release 真机多次测量，区分普通冷启动、首次安装或升级、更新激活与失败回退。JS 就绪日志不能代替实际显示时间；比较同类样本的中位数与 P95，不以单次升级启动推断提速。离线、深链和登录恢复也需验证。
 
 APK 声明可加载的 SDK 大版本，宿主动态更新必须属于该大版本。RN/Hermes ABI 或原生行为破坏旧应用兼容时，SDK 大版本必须同步递增；发布器阻止同大版本的 ABI 变化。作品兼容由宿主按 SDK 大版本和最低 API 判断，APK 保留底层运行时、下载哈希和 vendor 配对校验。
 
 分享使用 zijinhua.297782.xyz 的 HTTPS /posts/、/applications/ 链接，安装后由 Android App Links 打开。自定义 zijinhua://posts/<id>、zijinhua://applications/<id> 供网页按钮兜底。服务端 /.well-known/assetlinks.json 中的 SHA-256 指纹须匹配分发签名证书；更换签名时同步更新。验证使用 adb shell pm verify-app-links --re-verify com.zijinhua.app 与 adb shell pm get-app-links com.zijinhua.app，冷启动和 onNewIntent 均交给宿主路由处理。
+
+## 原生依赖补丁
+
+npm ci / npm install 的 postinstall 自动运行 patch-package。补丁改变原生实现，必须随新 APK 交付；升级依赖时重新核对，不能仅发布 JS 包。
+
+| 补丁 | 当前行为与约束 |
+| --- | --- |
+| react-native-gifted-charts 1.4.78 | 渐变使用现有 Skia，保留颜色、位置和起止点参数；不再依赖 Linear Gradient 或 Expo，升级时核对柱状图渐变及尺寸变化 |
+| react-native-video 6.19.3 | Android PlayerView 使用 TextureView，重置时保留最后一帧，支持滚动、变换与圆角裁切；影响所有视频实例，加入安全/DRM 视频前需复核 |
+| react-native-screens 4.28.0 | 页面导航栏 trait 不再写窗口，由 MainActivity 初始化透明且可见的导航栏；不改变顶部状态栏、方向与键盘处理 |
+| react-native-vision-camera-barcode-scanner 5.2.3 | 首次创建图片扫码器或相机扫码输出时初始化 ML Kit；宿主 Manifest 移除自动初始化 Provider，R8 保留反射注册器的无参构造 |
