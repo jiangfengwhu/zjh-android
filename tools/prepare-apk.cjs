@@ -47,7 +47,7 @@ async function main() {
   const shared = Object.fromEntries(platform.shared.map(name => { const pkg = name.startsWith('@') ? name.split('/').slice(0,2).join('/') : name.split('/')[0]; return [name, lock.packages['node_modules/' + pkg].version]; }));
   const local = { engineAbi: 'rn-' + shared['react-native'] + '-hermes-' + lock.packages['node_modules/hermes-compiler'].version, sdk: platform.sdk, shared };
   const host = release.applications;
-  if (!host || host.engineAbi !== local.engineAbi || host.sdk !== local.sdk || Object.keys(host.shared).length !== Object.keys(shared).length || Object.entries(shared).some(([name, version]) => host.shared[name] !== version)) throw new Error('宿主包与本次 APK 的应用契约不匹配');
+  if (!host || host.engineAbi !== local.engineAbi || host.sdk.split(".")[0] !== local.sdk.split(".")[0] || Object.keys(host.shared).length !== Object.keys(shared).length || Object.entries(shared).some(([name, version]) => host.shared[name] !== version)) throw new Error('宿主包与本次 APK 的应用契约不匹配');
   const assets = path.join(root, 'android/app/src/main/assets');
   await fs.mkdir(assets, { recursive: true });
   const prepared = [];

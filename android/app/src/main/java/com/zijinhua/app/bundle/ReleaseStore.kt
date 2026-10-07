@@ -411,6 +411,10 @@ class ReleaseStore(private val context: Context) {
     if (release.optString("runtimeVersion") != BuildConfig.BUNDLE_RUNTIME_VERSION) {
       throw IllegalArgumentException("配套需要不同的原生运行时，请更新 APK")
     }
+    val sdk = release.optJSONObject("applications")?.optString("sdk") ?: ""
+    if (!sdk.matches(Regex("\\d+\\.\\d+\\.\\d+")) || sdk.substringBefore(".").toIntOrNull() != BuildConfig.APPLICATION_SDK_MAJOR) {
+      throw IllegalArgumentException("宿主 SDK 大版本与 APK 不匹配，请更新紫金花")
+    }
     if (!release.optString("id").matches(HEX)) throw IllegalArgumentException("配套编号不对")
     val vendor = release.optJSONObject("vendor") ?: throw IllegalArgumentException("配套缺少 vendor")
     requireBlob(vendor)

@@ -35,6 +35,10 @@ async function main() {
   const publicModules = JSON.parse(await fs.readFile(path.join(root, "config/application-platform.json"), "utf8"));
   const shared = Object.fromEntries(publicModules.shared.map(name => [name, lock.packages[`node_modules/${(name.startsWith("@") ? name.split("/").slice(0, 2).join("/") : name.split("/")[0])}`].version]));
   const applications = { engineAbi: `rn-${shared["react-native"]}-hermes-${lock.packages["node_modules/hermes-compiler"].version}`, sdk: publicModules.sdk, shared };
+  const previousResponse = await fetch(`${process.env.BUNDLE_EDGE_BASE || "https://zijinhua.297782.xyz"}/v1/runtime`, { signal: AbortSignal.timeout(15000) });
+  if (!previousResponse.ok && previousResponse.status !== 404) throw new Error("无法核对原生升级基线");
+  const previous = previousResponse.ok ? await previousResponse.json() : undefined;
+  if (previous?.applications?.engineAbi !== undefined && previous.applications.engineAbi !== applications.engineAbi && previous.applications.sdk.split(".")[0] === applications.sdk.split(".")[0]) throw new Error("RN/Hermes ABI 已改变，必须升级 SDK 大版本");
   const contract = { format: 1, applications, apk, runtimeVersion: runtimeVersion(root), dynamicRepository: 'jiangfengwhu/zjh-dynamic', bridgeSdk: { sha256, bytes: bytes.length } };
   const file = path.join(out, 'runtime.json');
   await fs.writeFile(file, JSON.stringify(contract));

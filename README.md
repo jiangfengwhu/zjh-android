@@ -46,3 +46,5 @@ UI 变化走 dynamic 发布；原生变化需配套 APK 并协调 SDK、宿主�
 宿主请求 `/v1/updates?apkVersionCode=<本机版本>`，同时检查 APK 与动态清单。新版 APK 由用户点击后在应用内下载、校验，再调用 installPackage 打开系统安装界面；不跳浏览器、不静默安装，覆盖安装保留数据。
 
 原生 ReleaseCheck 目前仍由 WorkManager 每 30 分钟检查并暂存动态包；它与宿主页面的手动刷新、APK 安装流程分开。原生补丁及升级注意事项见 [patches/README.md](patches/README.md)。
+
+APK 声明可加载的 SDK 大版本，宿主动态更新必须属于该大版本。RN/Hermes ABI 或原生行为破坏旧应用兼容时，SDK 大版本必须同步递增；发布器阻止同大版本的 ABI 变化。作品兼容由宿主按 SDK 大版本和最低 API 判断，APK 保留底层运行时、下载哈希和 vendor 配对校验。

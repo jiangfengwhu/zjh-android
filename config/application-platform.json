@@ -1,5 +1,5 @@
 {
-  "sdk": "5.1.0",
+  "sdk": "1.0.0",
   "shared": [
     "@react-native-community/blur",
     "@react-native-community/datetimepicker",
