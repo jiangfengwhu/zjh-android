@@ -57,6 +57,16 @@ object ShellCapabilities {
   internal fun hostContext() = appContext()
 
   fun register(registry: PluginRegistry) {
+    registry.register("shell", "consumeLaunchLink") { payload ->
+      val url = JSONObject(payload).optString("url")
+      val host = activity ?: throw IllegalStateException("shell activity missing")
+      host.runOnUiThread {
+        if (url.isNotEmpty() && host.intent?.dataString == url) {
+          host.intent = Intent(host.intent).setAction(Intent.ACTION_MAIN).setData(null)
+        }
+      }
+      JSONObject().put("ok", true).toString()
+    }
     registry.register("shell", "capabilities") { _ -> capabilities().toString() }
     registry.register("shell", "notify") { payload -> notify(JSONObject(payload)).toString() }
     registry.register("shell", "schedule") { payload -> schedule(JSONObject(payload)).toString() }
