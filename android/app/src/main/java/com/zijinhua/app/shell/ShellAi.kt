@@ -50,14 +50,21 @@ object ShellAi {
     registry.register("shell", "completeCancel") { payload -> cancel(JSONObject(payload).getString("requestId")).toString() }
   }
 
+  private var restored = false
+
+  @Synchronized
   fun restore(context: Context) {
+    if (restored) return
     immersive = false
     lightSurface = readMode(context) == "light"
-    val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_BARS, null) ?: return
-    val saved = JSONObject(raw)
-    statusBarColor = colorOrNull(saved.optString("statusBar"))
-    navigationBarColor = colorOrNull(saved.optString("navigationBar"))
-    windowColor = colorOrNull(saved.optString("window"))
+    val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_BARS, null)
+    if (raw != null) {
+      val saved = JSONObject(raw)
+      statusBarColor = colorOrNull(saved.optString("statusBar"))
+      navigationBarColor = colorOrNull(saved.optString("navigationBar"))
+      windowColor = colorOrNull(saved.optString("window"))
+    }
+    restored = true
   }
 
   private fun systemBars(context: Context, input: JSONObject): JSONObject {

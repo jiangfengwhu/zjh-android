@@ -10,33 +10,16 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.View
+import android.view.Gravity
+import android.content.res.ColorStateList
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
 import androidx.activity.SystemBarStyle
-import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color as ComposeColor
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -51,7 +34,7 @@ import com.zijinhua.app.plugin.PluginCenter
 import com.zijinhua.app.shell.ShellAi
 import com.zijinhua.app.shell.ShellCapabilities
 
-// react-native-screens 的原生栈会把 Activity 转成 AppCompatActivity。它同时是 FragmentActivity，Compose 的 setContent 仍可用。
+// react-native-screens requires AppCompatActivity; RN is hosted directly in a native view.
 class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, PermissionAwareActivity {
   private val permissionListeners = mutableMapOf<Int, PermissionListener>()
 
@@ -70,8 +53,10 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     get() = (application as MainApplication).reactHost
 
   private var surface: ReactSurface? = null
-  private var canvas by mutableIntStateOf(Color.parseColor("#13100E"))
-  private var bundleLoading by mutableStateOf(false)
+  private var canvas = Color.parseColor("#13100E")
+  private lateinit var root: FrameLayout
+  private var loadingPanel: LinearLayout? = null
+  private var loadingLabel: TextView? = null
   private var edgesPinned = false
   private var appliedLight: Boolean? = null
   private var appliedBackdrop: Int? = null
@@ -80,21 +65,27 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   private val loadingHandler = Handler(Looper.getMainLooper())
   private val revealLoading = Runnable {
     if (loadingWanted) {
-      bundleLoading = true
+      showLoading()
       Log.i(TAG, "bundle loading visible")
     }
   }
 
-  /**
-   * Returns the name of the main component registered from JavaScript. This is used to schedule
-   * rendering of the component.
-   */
-  private val mainComponentName: String = "Zijinhua"
+  private val bundleLoadingListener: (Boolean) -> Unit = { loading ->
+    if (splashHeld) {
+      if (!loading) splashHeld = false
+    } else if (loading) {
+      loadingWanted = true
+      loadingHandler.removeCallbacks(revealLoading)
+      loadingHandler.postDelayed(revealLoading, LOADING_REVEAL_DELAY_MS)
+    } else {
+      loadingWanted = false
+      loadingHandler.removeCallbacks(revealLoading)
+      loadingPanel?.visibility = View.GONE
+    }
+  }
+  private val surfaceChangedListener: () -> Unit = { runOnUiThread { applySystemBars() } }
 
-  /**
-   * Returns the instance of the [ReactActivityDelegate]. We use [DefaultReactActivityDelegate]
-   * which allows you to enable New Architecture with a single boolean flags [fabricEnabled]
-   */
+  private val mainComponentName: String = "Zijinhua"
 
   override fun onCreate(savedInstanceState: Bundle?) {
     val splash = installSplashScreen()
@@ -110,32 +101,21 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
       navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
     )
     initializeSystemBars()
-    PluginCenter.onBundleLoading = { loading ->
-      if (splashHeld) {
-        if (!loading) splashHeld = false
-      } else if (loading) {
-        loadingWanted = true
-        loadingHandler.removeCallbacks(revealLoading)
-        loadingHandler.postDelayed(revealLoading, LOADING_REVEAL_DELAY_MS)
-      } else {
-        loadingWanted = false
-        loadingHandler.removeCallbacks(revealLoading)
-        bundleLoading = false
-      }
-    }
-    ShellAi.restore(this)
-    ShellAi.onSurfaceChanged = { runOnUiThread { applySystemBars() } }
+    PluginCenter.onBundleLoading = bundleLoadingListener
+    ShellAi.onSurfaceChanged = surfaceChangedListener
     applySystemBars()
     ShellCapabilities.attach(this)
     onBackPressedDispatcher.addCallback(this, BackCallback())
-    setContent {
-      MaterialTheme {
-        SideEffect { applySystemBars() }
-        Surface(modifier = Modifier.fillMaxSize(), color = ComposeColor(canvas)) {
-          ShellContent(reactHost, mainComponentName, ::attachSurface, bundleLoading, canvas)
-        }
-      }
-    }
+    root = FrameLayout(this).apply { setBackgroundColor(canvas) }
+    setContentView(root)
+    val created = reactHost.createSurface(this, mainComponentName, null)
+    attachSurface(created)
+    val view = created.view ?: throw IllegalStateException("ReactSurface has no view")
+    view.setBackgroundColor(canvas)
+    // React KeyboardProvider owns IME avoidance; keep the root geometry fixed.
+    root.addView(view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+    created.start()
+    Log.i(TAG, "react surface started component=$mainComponentName")
     Log.i(TAG, "activity created")
   }
 
@@ -174,6 +154,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
   override fun onDestroy() {
     loadingHandler.removeCallbacks(revealLoading)
+    if (PluginCenter.onBundleLoading === bundleLoadingListener) PluginCenter.onBundleLoading = null
+    if (ShellAi.onSurfaceChanged === surfaceChangedListener) ShellAi.onSurfaceChanged = null
     surface?.stop()
     surface = null
     reactHost.onHostDestroy(this)
@@ -188,6 +170,31 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     }
   }
 
+  private fun showLoading() {
+    val panel = loadingPanel ?: LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      gravity = Gravity.CENTER
+      setBackgroundColor(canvas)
+      val spinner = ProgressBar(this@MainActivity).apply {
+        indeterminateTintList = ColorStateList.valueOf(Color.parseColor("#8B5CF6"))
+      }
+      val size = (48 * resources.displayMetrics.density).toInt()
+      addView(spinner, LinearLayout.LayoutParams(size, size))
+      val label = TextView(this@MainActivity).apply {
+        text = "正在加载应用"
+        textSize = 15f
+        setTextColor(if (ShellAi.lightSurface) Color.parseColor("#0B111E") else Color.parseColor("#F1F5F9"))
+      }
+      addView(label, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+        topMargin = (16 * resources.displayMetrics.density).toInt()
+      })
+      loadingLabel = label
+      root.addView(this, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+      loadingPanel = this
+    }
+    panel.visibility = View.VISIBLE
+  }
+
   private fun canvasColor(): Int {
     return if (ShellAi.lightSurface) Color.parseColor("#FFF9ED") else Color.parseColor("#19152C")
   }
@@ -195,7 +202,13 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   private fun applySystemBars() {
     val light = ShellAi.lightSurface
     val backdrop = canvasColor()
-    if (canvas != backdrop) canvas = backdrop
+    if (canvas != backdrop) {
+      canvas = backdrop
+      if (::root.isInitialized) root.setBackgroundColor(backdrop)
+      surface?.view?.setBackgroundColor(backdrop)
+      loadingPanel?.setBackgroundColor(backdrop)
+    }
+    loadingLabel?.setTextColor(if (light) Color.parseColor("#0B111E") else Color.parseColor("#F1F5F9"))
     if (appliedLight != light || appliedBackdrop != backdrop) {
       appliedLight = light
       appliedBackdrop = backdrop
@@ -279,49 +292,5 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   private companion object {
     const val TAG = "MainActivity"
     const val LOADING_REVEAL_DELAY_MS = 400L
-  }
-}
-
-@Composable
-private fun ShellContent(
-  reactHost: ReactHost,
-  componentName: String,
-  onSurface: (ReactSurface) -> Unit,
-  loading: Boolean,
-  canvas: Int,
-) {
-  Box(modifier = Modifier.fillMaxSize()) {
-    AndroidView(
-      // React's KeyboardProvider owns IME avoidance. Keep its root geometry fixed.
-      modifier = Modifier.fillMaxSize(),
-      factory = { context ->
-        val created = reactHost.createSurface(context, componentName, null)
-        onSurface(created)
-        created.start()
-        val view = created.view
-          ?: throw IllegalStateException("ReactSurface has no view")
-        view.setBackgroundColor(canvas)
-        Log.i("MainActivity", "react surface started component=$componentName")
-        view
-      },
-      update = { view -> view.setBackgroundColor(canvas) },
-    )
-    if (loading) {
-      Column(
-        modifier = Modifier
-          .fillMaxSize()
-          .background(ComposeColor(canvas)),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-      ) {
-        CircularProgressIndicator(color = ComposeColor(0xFF8B5CF6))
-        Text(
-          text = "正在加载应用",
-          color = if (ShellAi.lightSurface) ComposeColor(0xFF0B111E) else ComposeColor(0xFFF1F5F9),
-          fontSize = 15.sp,
-          modifier = Modifier.padding(top = 16.dp),
-        )
-      }
-    }
   }
 }

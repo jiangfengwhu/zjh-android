@@ -65,6 +65,13 @@
       android:theme="@style/Theme.Zijinhua.Splash"
       android:usesCleartextTraffic="true"
       android:supportsRtl="true">
+      <provider
+        android:name="androidx.startup.InitializationProvider"
+        android:authorities="${applicationId}.androidx-startup"
+        android:exported="false"
+        tools:node="merge">
+        <meta-data android:name="androidx.work.WorkManagerInitializer" tools:node="remove" />
+      </provider>
       <!-- Initialize ML Kit only when a barcode scanner is requested. -->
       <provider
         android:name="com.google.mlkit.common.internal.MlKitInitProvider"

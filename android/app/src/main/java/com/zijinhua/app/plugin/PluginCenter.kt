@@ -10,7 +10,6 @@ import com.zijinhua.app.bundle.BundleInventory
 import com.zijinhua.app.bundle.ReleaseStore
 import com.zijinhua.app.bundle.SplitBundle
 import com.zijinhua.app.bundle.ApplicationStore
-import com.zijinhua.app.shell.ShellAlarms
 import com.zijinhua.app.shell.ShellAi
 import com.zijinhua.app.shell.ShellBluetooth
 import com.zijinhua.app.shell.ShellCapabilities
@@ -117,6 +116,7 @@ object PluginCenter {
     registry.register("shell", "bundleReady", PluginHandler { _ ->
       setBundleLoading(false)
       ReleaseStore(context).markHealthy()
+      (context.applicationContext as MainApplication).onShellReady()
       """{"ok":true}"""
     })
     registry.register("shell", "loadApp", PluginHandler { _ ->
@@ -166,7 +166,6 @@ object PluginCenter {
     ShellNfc.register(registry)
     ShellComms.register(registry)
     ShellAi.register(registry, context)
-    ShellAlarms.reschedule(context)
     Log.i(TAG, "builtins registered for ${context.packageName}")
   }
 

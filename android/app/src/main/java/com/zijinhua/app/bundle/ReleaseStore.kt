@@ -88,14 +88,17 @@ class ReleaseStore(private val context: Context) {
     }
   }
 
-  /** JS 已经跑到 bundleReady：这一套启动成功，清掉启动标记并回收用不到的包体。 */
+  /** JS 已经跑到 bundleReady：立即确认健康，磁盘回收由延后的维护任务处理。 */
   fun markHealthy() {
     synchronized(STATE) {
       val pending = File(root, "boot.pending")
       if (pending.isFile) pending.delete()
-      gc()
       Log.i(TAG, "release healthy id=${readActive()?.optString("id")}")
     }
+  }
+
+  fun collectUnused() {
+    synchronized(STATE) { gc() }
   }
 
   fun pendingItem(): JSONObject? {

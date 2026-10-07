@@ -25,6 +25,7 @@ object ShellAlarms {
   private const val PREFS = "zijinhua.shell.alarms"
   private const val KEY = "entries"
 
+  @Synchronized
   fun schedule(context: Context, id: String, title: String, body: String, atMs: Long): JSONObject {
     val safeId = requireId(id)
     val trigger = atMs.coerceAtLeast(System.currentTimeMillis() + 500L)
@@ -38,6 +39,7 @@ object ShellAlarms {
       .put("exact", exact)
   }
 
+  @Synchronized
   fun cancel(context: Context, id: String): JSONObject {
     val safeId = requireId(id)
     val alarmManager = context.getSystemService(AlarmManager::class.java)
@@ -51,6 +53,7 @@ object ShellAlarms {
     return JSONObject().put("ok", true).put("id", safeId)
   }
 
+  @Synchronized
   fun list(context: Context): JSONObject {
     val items = JSONArray()
     read(context).forEach { items.put(it) }
@@ -71,6 +74,7 @@ object ShellAlarms {
     Log.i(TAG, "notification posted id=$id")
   }
 
+  @Synchronized
   fun fire(context: Context, intent: Intent) {
     val id = intent.getStringExtra(EXTRA_ID) ?: return
     val title = intent.getStringExtra(EXTRA_TITLE) ?: ""
@@ -81,6 +85,7 @@ object ShellAlarms {
     Log.i(TAG, "alarm fired id=$id")
   }
 
+  @Synchronized
   fun reschedule(context: Context) {
     val now = System.currentTimeMillis()
     val future = mutableListOf<JSONObject>()
