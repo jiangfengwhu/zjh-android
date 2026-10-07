@@ -194,7 +194,6 @@ class ReleaseStore(private val context: Context) {
       writePointer("current", id)
       File(incoming, "$id.json").delete()
       syncLive()
-      gc()
       Log.i(TAG, "promoted release id=$id")
       return true
     }
@@ -292,7 +291,6 @@ class ReleaseStore(private val context: Context) {
       resetToSeed(installedStamp(), keepBad = true)
     }
     syncLive()
-    gc()
   }
 
   /** 现行一套的 vendor 放到固定位置。启动时和每次换新后都会核对，中途断电也能自己补齐。 */

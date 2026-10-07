@@ -28,8 +28,17 @@ object PluginCenter {
   private var appContext: Context? = null
   private var appContextId = 0
   var onBundleLoading: ((Boolean) -> Unit)? = null
+  var onStartupFailure: (() -> Unit)? = null
+  @Volatile var startupFailed = false
+    private set
+
+  fun reportStartupFailure() {
+    startupFailed = true
+    Handler(Looper.getMainLooper()).post { onStartupFailure?.invoke() }
+  }
 
   fun setBundleLoading(loading: Boolean) {
+    startupFailed = false
     Log.i(TAG, "bundle loading $loading")
     val callback = onBundleLoading ?: return
     Handler(Looper.getMainLooper()).post { callback(loading) }
@@ -89,12 +98,9 @@ object PluginCenter {
   }
 
   fun syncPlugins(): String {
-    return io.submit<String> { syncOnIo() }.get(60, TimeUnit.SECONDS)
-  }
-
-  private fun syncOnIo(): String {
+    // Plugins are installed at boot and replaced explicitly on promotion.
+    // Retain the old bridge entry without reloading the same DEX classes.
     Log.i(TAG, "plugins stay with the installed release")
-    reload()
     return JSONObject().put("ok", true).put("written", 0).toString()
   }
 
@@ -120,7 +126,12 @@ object PluginCenter {
       """{"ok":true}"""
     })
     registry.register("shell", "loadApp", PluginHandler { _ ->
-      loadApp()
+      try {
+        loadApp()
+      } catch (error: Exception) {
+        reportStartupFailure()
+        throw error
+      }
     })
     registry.register("shell", "loadApplication", PluginHandler { payload ->
       val context = appContext ?: throw IllegalStateException("plugin center not installed")

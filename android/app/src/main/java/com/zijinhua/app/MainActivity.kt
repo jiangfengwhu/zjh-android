@@ -16,6 +16,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Button
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -57,12 +58,17 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   private lateinit var root: FrameLayout
   private var loadingPanel: LinearLayout? = null
   private var loadingLabel: TextView? = null
+  private var startupFailurePanel: LinearLayout? = null
   private var edgesPinned = false
   private var appliedLight: Boolean? = null
   private var appliedBackdrop: Int? = null
   private var splashHeld = true
   private var loadingWanted = false
   private val loadingHandler = Handler(Looper.getMainLooper())
+  private val startupTimeout = Runnable {
+    showStartupFailure()
+    Log.e(TAG, "startup did not reach bundleReady within timeout")
+  }
   private val revealLoading = Runnable {
     if (loadingWanted) {
       showLoading()
@@ -71,6 +77,10 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   }
 
   private val bundleLoadingListener: (Boolean) -> Unit = { loading ->
+    if (!loading) {
+      loadingHandler.removeCallbacks(startupTimeout)
+      startupFailurePanel?.visibility = View.GONE
+    }
     if (splashHeld) {
       if (!loading) splashHeld = false
     } else if (loading) {
@@ -83,6 +93,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
       loadingPanel?.visibility = View.GONE
     }
   }
+  private val startupFailureListener: () -> Unit = { showStartupFailure() }
   private val surfaceChangedListener: () -> Unit = { runOnUiThread { applySystemBars() } }
 
   private val mainComponentName: String = "Zijinhua"
@@ -102,38 +113,58 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     )
     initializeSystemBars()
     PluginCenter.onBundleLoading = bundleLoadingListener
+    PluginCenter.onStartupFailure = startupFailureListener
     ShellAi.onSurfaceChanged = surfaceChangedListener
     applySystemBars()
     ShellCapabilities.attach(this)
     onBackPressedDispatcher.addCallback(this, BackCallback())
     root = FrameLayout(this).apply { setBackgroundColor(canvas) }
     setContentView(root)
-    val created = reactHost.createSurface(this, mainComponentName, null)
-    attachSurface(created)
-    val view = created.view ?: throw IllegalStateException("ReactSurface has no view")
-    view.setBackgroundColor(canvas)
-    // React KeyboardProvider owns IME avoidance; keep the root geometry fixed.
-    root.addView(view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-    created.start()
-    Log.i(TAG, "react surface started component=$mainComponentName")
+    loadingHandler.postDelayed(startupTimeout, STARTUP_TIMEOUT_MS)
+    startReactSurface()
     Log.i(TAG, "activity created")
+  }
+
+  private fun startReactSurface() {
+    (application as MainApplication).whenReactReady { error ->
+      if (isDestroyed || isFinishing || surface != null) return@whenReactReady
+      if (error != null) {
+        showStartupFailure()
+      } else {
+        try {
+          applySystemBars()
+          val created = reactHost.createSurface(this, mainComponentName, null)
+          attachSurface(created)
+          val view = created.view ?: throw IllegalStateException("ReactSurface has no view")
+          view.setBackgroundColor(canvas)
+          // Keep React below any startup failure overlay shown during preparation.
+          root.addView(view, 0, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+          created.start()
+          if (PluginCenter.startupFailed) showStartupFailure()
+          Log.i(TAG, "react surface started component=$mainComponentName")
+        } catch (failure: Exception) {
+          Log.e(TAG, "react surface failed", failure)
+          showStartupFailure()
+        }
+      }
+    }
   }
 
   @Deprecated("Activity result API is used by React Native libraries")
   override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
     super.onActivityResult(requestCode, resultCode, data)
-    reactHost.onActivityResult(this, requestCode, resultCode, data)
+    if (surface != null) reactHost.onActivityResult(this, requestCode, resultCode, data)
   }
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
     setIntent(intent)
-    reactHost.onNewIntent(intent)
+    if (surface != null) reactHost.onNewIntent(intent)
   }
 
   override fun onWindowFocusChanged(hasFocus: Boolean) {
     super.onWindowFocusChanged(hasFocus)
-    reactHost.onWindowFocusChange(hasFocus)
+    if (surface != null) reactHost.onWindowFocusChange(hasFocus)
     if (hasFocus) applySystemBars()
   }
 
@@ -154,11 +185,15 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
   override fun onDestroy() {
     loadingHandler.removeCallbacks(revealLoading)
+    loadingHandler.removeCallbacks(startupTimeout)
     if (PluginCenter.onBundleLoading === bundleLoadingListener) PluginCenter.onBundleLoading = null
+    if (PluginCenter.onStartupFailure === startupFailureListener) PluginCenter.onStartupFailure = null
     if (ShellAi.onSurfaceChanged === surfaceChangedListener) ShellAi.onSurfaceChanged = null
-    surface?.stop()
+    if (surface != null) {
+      surface?.stop()
+      reactHost.onHostDestroy(this)
+    }
     surface = null
-    reactHost.onHostDestroy(this)
     ShellCapabilities.detach(this)
     super.onDestroy()
   }
@@ -168,6 +203,54 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
       reactHost.onHostResume(this, this)
     }
+  }
+
+  private fun showStartupFailure() {
+    if (!::root.isInitialized || isDestroyed || isFinishing) return
+    splashHeld = false
+    loadingWanted = false
+    loadingHandler.removeCallbacks(startupTimeout)
+    loadingHandler.removeCallbacks(revealLoading)
+    loadingPanel?.visibility = View.GONE
+    // This only reveals recovery UI. boot.pending is deliberately left intact.
+    val panel = startupFailurePanel ?: LinearLayout(this).apply {
+      orientation = LinearLayout.VERTICAL
+      gravity = Gravity.CENTER
+      val padding = (24 * resources.displayMetrics.density).toInt()
+      setPadding(padding, padding, padding, padding)
+      setBackgroundColor(canvas)
+      addView(TextView(this@MainActivity).apply {
+        text = "应用启动未完成"
+        textSize = 20f
+        setTextColor(if (ShellAi.lightSurface) Color.parseColor("#30233F") else Color.parseColor("#FFF6E8"))
+      })
+      addView(TextView(this@MainActivity).apply {
+        text = "可以重试加载，或关闭后重新打开应用。"
+        textSize = 15f
+        setTextColor(if (ShellAi.lightSurface) Color.parseColor("#30233F") else Color.parseColor("#FFF6E8"))
+      })
+      addView(Button(this@MainActivity).apply {
+        text = "重试加载"
+        setOnClickListener {
+          startupFailurePanel?.visibility = View.GONE
+          PluginCenter.setBundleLoading(true)
+          loadingHandler.postDelayed(startupTimeout, STARTUP_TIMEOUT_MS)
+          if (surface == null) {
+            (application as MainApplication).retryReactPreparation()
+            startReactSurface()
+          } else {
+            reactHost.reload("startup-retry")
+          }
+        }
+      })
+      addView(Button(this@MainActivity).apply {
+        text = "返回"
+        setOnClickListener { moveTaskToBack(true) }
+      })
+      root.addView(this, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+      startupFailurePanel = this
+    }
+    panel.visibility = View.VISIBLE
   }
 
   private fun showLoading() {
@@ -292,5 +375,6 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   private companion object {
     const val TAG = "MainActivity"
     const val LOADING_REVEAL_DELAY_MS = 400L
+    const val STARTUP_TIMEOUT_MS = 30000L
   }
 }

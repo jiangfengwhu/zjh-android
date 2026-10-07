@@ -22,6 +22,8 @@ cd android
 
 Windows 使用 gradlew.bat。输出 android/app/build/outputs/apk/release/app-release.apk，使用 `adb install -r <apk>` 覆盖安装并保留数据。
 
+Windows 构建音频原生依赖需要 Git Bash 及其 Unix 工具。若脚本提示找不到 mkdir/rm，需将 Git 安装目录的 usr/bin 和 mingw64/bin 加入当前构建进程 PATH，再运行 Gradle。
+
 prepare:apk 下载线上宿主 vendor/app 并校验哈希与运行时契约，不内置 plugin 应用。Jolly 制作进度页及视频属于宿主；准备资源时清理旧 Jolly 应用 seed。
 
 Release 开启 R8 代码与资源裁剪、内置 bundle 压缩；独立 DEX 插件使用的公共桥接类型保留名称与成员。原生共享库保持直接加载，不以安装后额外解压换取下载体积。
@@ -45,7 +47,11 @@ UI 变化走 dynamic 发布；原生变化需配套 APK 并协调 SDK、宿主�
 
 宿主请求 `/v1/updates?apkVersionCode=<本机版本>`，同时检查 APK 与动态清单。新版 APK 由用户点击后在应用内下载、校验，再调用 installPackage 打开系统安装界面；不跳浏览器、不静默安装，覆盖安装保留数据。
 
-RN 由 AppCompatActivity 的原生视图直接承载。首页就绪后延迟 1.5 秒，在后台初始化 WorkManager、恢复提醒和清理旧包；启动健康确认与失败回退仍立即执行。后台任务可通过 Configuration.Provider 按需初始化 WorkManager。
+RN 由 AppCompatActivity 的 FrameLayout 直接承载 ReactSurface。宿主根布局完成且导航就绪后调用 bundleReady，确认包启动健康并释放原生启动图；这不代表首页数据加载完成或屏幕已经绘制。随后延迟 1.5 秒，在后台注册 WorkManager 更新任务、恢复提醒和执行常规旧包清理。后台任务可通过 Configuration.Provider 按需初始化 WorkManager。
+
+Release 冷启动由 Application 启动 ShellStartup 后台任务：执行 prepareBoot，恢复 APK 内置包、处理失败回退、激活已暂存更新并准备固定 vendor 路径，再注册内置桥接和加载当前版本的 DEX 插件。任务完成后才在主线程启动 ReactHost 并创建 ReactSurface，避免提前捕获旧 vendor 路径或未注册的原生视图。首次安装或 APK 升级仍会复制并计算内置包哈希，激活暂存更新仍会重新校验包哈希；常规回收统一在 bundleReady 后延迟执行。重载后的 bundleReady 也触发回收，服务注册与提醒恢复每进程只执行一次。
+
+准备失败或 app 包加载失败时退出启动图并显示原生恢复页；启动 30 秒仍未收到 bundleReady 时也显示恢复页，可重试或返回。准备失败重试重新执行准备任务，已有 RN 容器时重试重载 ReactHost；失败展示不会清除 boot.pending，成功仍由 bundleReady 确认。syncPlugins 保留兼容入口，当前版本已经在启动时注册，不重复加载同一份 DEX；显式重载或激活新版本才重新注册。
 
 原生 ReleaseCheck 仍由 WorkManager 每 30 分钟检查并暂存动态包；它与宿主页面的手动刷新、APK 安装流程分开。原生补丁及升级注意事项见 [patches/README.md](patches/README.md)。
 

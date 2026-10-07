@@ -8,6 +8,7 @@ import android.os.Looper
 import androidx.work.Configuration
 import com.zijinhua.app.shell.ShellAlarms
 import java.util.concurrent.Executors
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicBoolean
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
@@ -26,16 +27,31 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
     get() = Configuration.Builder().build()
 
   private val maintenanceScheduled = AtomicBoolean(false)
+  @Volatile private var reactReady = CompletableFuture<Unit>()
+  private var releasePrepared = false
+  private val mainHandler = Handler(Looper.getMainLooper())
   private val maintenance by lazy { Executors.newSingleThreadExecutor { task -> Thread(task, "ShellMaintenance") } }
 
+  fun whenReactReady(callback: (Throwable?) -> Unit) {
+    reactReady.whenComplete { _, error -> mainHandler.post { callback(error) } }
+  }
+
+  fun retryReactPreparation() {
+    if (!reactReady.isCompletedExceptionally) return
+    reactReady = CompletableFuture<Unit>()
+    prepareReact()
+  }
+
   fun onShellReady() {
-    if (!maintenanceScheduled.compareAndSet(false, true)) return
+    val initializeServices = maintenanceScheduled.compareAndSet(false, true)
     Handler(Looper.getMainLooper()).postDelayed({
       maintenance.execute {
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
         val started = SystemClock.elapsedRealtime()
-        runCatching { ReleaseCheck.ensure(this) }.onFailure { Log.w(TAG, "release scheduling failed", it) }
-        runCatching { ShellAlarms.reschedule(this) }.onFailure { Log.w(TAG, "alarm restoration failed", it) }
+        if (initializeServices) {
+          runCatching { ReleaseCheck.ensure(this) }.onFailure { Log.w(TAG, "release scheduling failed", it) }
+          runCatching { ShellAlarms.reschedule(this) }.onFailure { Log.w(TAG, "alarm restoration failed", it) }
+        }
         runCatching { ReleaseStore(this).collectUnused() }.onFailure { Log.w(TAG, "release cleanup failed", it) }
         Log.i(TAG, "startup maintenance complete elapsedMs=${SystemClock.elapsedRealtime() - started}")
       }
@@ -62,21 +78,45 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
   }
 
   override fun onCreate() {
+    super.onCreate()
+    Log.i(TAG, "startup application-create")
+    prepareReact()
+  }
+
+  private fun prepareReact() {
     val started = SystemClock.elapsedRealtime()
     fun milestone(stage: String) = Log.i(TAG, "startup $stage elapsedMs=${SystemClock.elapsedRealtime() - started}")
-    super.onCreate()
-    milestone("application-create")
-    ReactFontManager.getInstance().addCustomFont(this, "Fusion Pixel 12px Proportional SC", R.font.fusion_pixel)
-    if (!ReactBuildConfig.DEBUG) {
-      ReleaseStore(this).prepareBoot()
+    // Establish the Activity/splash first. Disk verification and DEX loading
+    // must finish before RN captures the vendor path and native view managers.
+    val startup = Executors.newSingleThreadExecutor { task -> Thread(task, "ShellStartup") }
+    startup.execute {
+      try {
+        if (!releasePrepared) {
+          if (!ReactBuildConfig.DEBUG) ReleaseStore(this).prepareBoot()
+          releasePrepared = true
+        }
+        milestone("release-prepared")
+        PluginCenter.install(this)
+        milestone("services-registered")
+        mainHandler.post {
+          try {
+            ReactFontManager.getInstance().addCustomFont(this, "Fusion Pixel 12px Proportional SC", R.font.fusion_pixel)
+            loadReactNative(this)
+            reactHost.start()
+            milestone("react-started")
+            reactReady.complete(Unit)
+          } catch (error: Exception) {
+            Log.e(TAG, "react startup failed", error)
+            reactReady.completeExceptionally(error)
+          }
+        }
+      } catch (error: Exception) {
+        Log.e(TAG, "startup preparation failed", error)
+        reactReady.completeExceptionally(error)
+      } finally {
+        startup.shutdown()
+      }
     }
-    milestone("release-prepared")
-    PluginCenter.install(this)
-    milestone("services-registered")
-    loadReactNative(this)
-    reactHost.start()
-    milestone("react-started")
-    Log.i(TAG, "shell started")
   }
 
   private companion object {
