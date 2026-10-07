@@ -2,6 +2,7 @@ package com.zijinhua.app
 
 import android.app.Application
 import android.util.Log
+import android.os.SystemClock
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -36,15 +37,21 @@ class MainApplication : Application(), ReactApplication {
   }
 
   override fun onCreate() {
+    val started = SystemClock.elapsedRealtime()
+    fun milestone(stage: String) = Log.i(TAG, "startup $stage elapsedMs=${SystemClock.elapsedRealtime() - started}")
     super.onCreate()
+    milestone("application-create")
     ReactFontManager.getInstance().addCustomFont(this, "Fusion Pixel 12px Proportional SC", R.font.fusion_pixel)
     if (!ReactBuildConfig.DEBUG) {
       ReleaseStore(this).prepareBoot()
     }
+    milestone("release-prepared")
     PluginCenter.install(this)
     ReleaseCheck.ensure(this)
+    milestone("services-registered")
     loadReactNative(this)
     reactHost.start()
+    milestone("react-started")
     Log.i(TAG, "shell started")
   }
 

@@ -23,6 +23,12 @@
 # Scheduled workers can outlive the APK that originally saved their class names.
 -keep class com.zijinhua.app.bundle.ReleaseCheckWorker { *; }
 
+# ML Kit discovers these implementations from manifest metadata via reflection.
+# R8 full mode must retain the public no-argument constructors too.
+-keep class com.google.mlkit.** implements com.google.firebase.components.ComponentRegistrar {
+    public <init>();
+}
+
 # SplitBundle invokes RN's internal loader reflectively (Kotlin adds a module suffix).
 -keepclassmembers class com.facebook.react.runtime.ReactHostImpl {
     *** loadBundle*(com.facebook.react.bridge.JSBundleLoader);

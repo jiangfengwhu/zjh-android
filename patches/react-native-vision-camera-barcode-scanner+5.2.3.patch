@@ -1,0 +1,41 @@
+diff --git a/node_modules/react-native-vision-camera-barcode-scanner/android/src/main/java/com/margelo/nitro/camera/barcodescanner/HybridBarcodeScannerFactory.kt b/node_modules/react-native-vision-camera-barcode-scanner/android/src/main/java/com/margelo/nitro/camera/barcodescanner/HybridBarcodeScannerFactory.kt
+index fa04c1e..53b26fd 100644
+--- a/node_modules/react-native-vision-camera-barcode-scanner/android/src/main/java/com/margelo/nitro/camera/barcodescanner/HybridBarcodeScannerFactory.kt
++++ b/node_modules/react-native-vision-camera-barcode-scanner/android/src/main/java/com/margelo/nitro/camera/barcodescanner/HybridBarcodeScannerFactory.kt
+@@ -2,6 +2,8 @@ package com.margelo.nitro.camera.barcodescanner
+ 
+ import androidx.annotation.Keep
+ import com.facebook.proguard.annotations.DoNotStrip
++import com.google.mlkit.common.MlKit
++import com.margelo.nitro.NitroModules
+ import com.margelo.nitro.camera.HybridCameraOutputSpec
+ 
+ @DoNotStrip
+@@ -10,12 +12,27 @@ class HybridBarcodeScannerFactory : HybridBarcodeScannerFactorySpec() {
+   @DoNotStrip
+   @Keep
+   override fun createBarcodeScanner(options: BarcodeScannerOptions): HybridBarcodeScannerSpec {
++    initializeMlKit()
+     return HybridBarcodeScanner(options)
+   }
+ 
+   @DoNotStrip
+   @Keep
+   override fun createBarcodeScannerOutput(options: BarcodeScannerOutputOptions): HybridCameraOutputSpec {
++    initializeMlKit()
+     return HybridBarcodeScannerOutput(options)
+   }
++
++  private companion object {
++    private var initialized = false
++
++    @Synchronized
++    fun initializeMlKit() {
++      if (initialized) return
++      val context = NitroModules.applicationContext ?: error("No ApplicationContext set!")
++      MlKit.initialize(context)
++      initialized = true
++      android.util.Log.i("BarcodeScanner", "ML Kit initialized on first scanner creation")
++    }
++  }
+ }
