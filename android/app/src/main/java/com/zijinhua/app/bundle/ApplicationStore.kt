@@ -7,7 +7,10 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.ConcurrentHashMap
-import java.security.MessageDigest
+import java.util.concurrent.Executors
+import java.util.concurrent.FutureTask
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /** Immutable application blobs. JS checks the public SDK contract before invoking this loader. */
 class ApplicationStore(private val context: Context) {
@@ -15,9 +18,72 @@ class ApplicationStore(private val context: Context) {
 
   private companion object {
     val downloadLocks = ConcurrentHashMap<String, Any>()
+    val resources = Executors.newFixedThreadPool(6)
+    val preparing = ConcurrentHashMap<String, FutureTask<PreparedApplication>>()
+    val prepared = LinkedHashMap<String, PreparedApplication>(32, 0.75f, true)
   }
 
-  fun obtain(manifest: JSONObject): File {
+  data class PreparedApplication(val file: File, val assets: Map<String, String>)
+
+  /** Preparation and execution share the exact same immutable paths. */
+  fun prepare(manifest: JSONObject): PreparedApplication {
+    val key = root.absolutePath + "/" + manifest.getString("appId") + ":" + manifest.getString("releaseId")
+    val task = FutureTask<PreparedApplication> {
+      val result = downloadResources(manifest)
+      synchronized(prepared) {
+        prepared[key] = result
+        while (prepared.size > 32) prepared.remove(prepared.keys.first())
+      }
+      result
+    }
+    val flight = synchronized(prepared) {
+      prepared[key]?.let {
+        Log.i("ApplicationStore", "reuse prepared app=${manifest.getString("appId")} assets=${it.assets.size}")
+        return it
+      }
+      preparing.putIfAbsent(key, task) ?: task
+    }
+    // A bridge worker coordinates the job; only file IO uses the resource pool.
+    // Concurrent prepare/open calls join this job without queueing another one.
+    if (flight === task) task.run()
+    return try { flight.get() } finally {
+      if (flight.isDone) preparing.remove(key, flight)
+    }
+  }
+
+  private fun downloadResources(manifest: JSONObject): PreparedApplication {
+    val appId = manifest.getString("appId")
+    val releaseId = manifest.getString("releaseId")
+    val entries = manifest.optJSONArray("assets")
+    val count = (entries?.length() ?: 0) + 1
+    val next = AtomicInteger(0)
+    val bundle = AtomicReference<File>()
+    val paths = ConcurrentHashMap<String, String>()
+    // Two workers per application, six globally: the first two jobs are the
+    // bundle and first asset, then assets continue concurrently without queuing
+    // an application's entire resource list ahead of the following works.
+    val workers = (0 until minOf(2, count)).map {
+      resources.submit {
+        while (true) {
+          val index = next.getAndIncrement()
+          if (index >= count) break
+          if (index == 0) bundle.set(obtain(manifest))
+          else {
+            val asset = entries!!.getJSONObject(index - 1)
+            val name = asset.getString("name")
+            require(name.isNotEmpty() && !name.contains("..") && !name.startsWith("/") && !name.contains("\\")) { "invalid asset name" }
+            val item = JSONObject().put("appId", appId).put("releaseId", releaseId).put("bundle", asset)
+            paths[name] = "file://${obtain(item).absolutePath}"
+          }
+        }
+      }
+    }
+    workers.forEach { it.get() }
+    Log.i("ApplicationStore", "prepared app=$appId release=$releaseId assets=${paths.size}")
+    return PreparedApplication(checkNotNull(bundle.get()), paths.toMap())
+  }
+
+  private fun obtain(manifest: JSONObject): File {
     val key = manifest.getString("appId") + "/" + manifest.getJSONObject("bundle").getString("sha256")
     return synchronized(downloadLocks.computeIfAbsent(key) { Any() }) { obtainLocked(manifest) }
   }
@@ -77,19 +143,6 @@ class ApplicationStore(private val context: Context) {
     require(Regex("^[a-z][a-z0-9-]{0,63}$").matches(appId)) { "invalid application identity" }
     return try { context.assets.open("applications/$appId/manifest.json").bufferedReader().use { JSONObject(it.readText()) } }
     catch (_: java.io.FileNotFoundException) { null }
-  }
-
-  fun assets(manifest: JSONObject): JSONObject {
-    val result = JSONObject()
-    val entries = manifest.optJSONArray("assets") ?: return result
-    for (index in 0 until entries.length()) {
-      val asset = entries.getJSONObject(index)
-      val name = asset.getString("name")
-      require(name.isNotEmpty() && !name.contains("..") && !name.startsWith("/") && !name.contains("\\")) { "invalid asset name" }
-      val item = JSONObject(manifest.toString()).put("bundle", asset)
-      result.put(name, "file://${obtain(item).absolutePath}")
-    }
-    return result
   }
 
   private fun complete(file: File, bytes: Long): Boolean = file.isFile && file.length() == bytes

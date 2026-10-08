@@ -137,10 +137,9 @@ object PluginCenter {
     registry.register("shell", "loadApplication", PluginHandler { payload ->
       val context = appContext ?: throw IllegalStateException("plugin center not installed")
       val manifest = JSONObject(payload)
-      val file = io.submit<java.io.File> { ApplicationStore(context).obtain(manifest) }.get(90, TimeUnit.SECONDS)
-      val assets = io.submit<JSONObject> { ApplicationStore(context).assets(manifest) }.get(180, TimeUnit.SECONDS)
-      SplitBundle.load((context.applicationContext as MainApplication).reactHost, file.absolutePath)
-      JSONObject().put("ok", true).put("assets", assets).put("releaseId", manifest.getString("releaseId")).toString()
+      val prepared = ApplicationStore(context).prepare(manifest)
+      SplitBundle.load((context.applicationContext as MainApplication).reactHost, prepared.file.absolutePath)
+      JSONObject().put("ok", true).put("assets", JSONObject(prepared.assets)).put("releaseId", manifest.getString("releaseId")).toString()
     })
     registry.register("shell", "applicationSeed", PluginHandler { payload ->
       val context = appContext ?: throw IllegalStateException("plugin center not installed")
@@ -150,8 +149,7 @@ object PluginCenter {
       val context = appContext ?: throw IllegalStateException("plugin center not installed")
       val manifest = JSONObject(payload)
       downloads.submit<Boolean> {
-        ApplicationStore(context).obtain(manifest)
-        ApplicationStore(context).assets(manifest)
+        ApplicationStore(context).prepare(manifest)
         true
       }.get(180, TimeUnit.SECONDS)
       JSONObject().put("ok", true).toString()
