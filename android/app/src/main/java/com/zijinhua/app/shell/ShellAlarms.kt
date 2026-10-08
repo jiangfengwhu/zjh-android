@@ -64,7 +64,7 @@ object ShellAlarms {
     ensureChannel(context)
     val notification = NotificationCompat.Builder(context, CHANNEL_ID)
       .setSmallIcon(R.drawable.ic_shell_notify)
-      .setContentTitle(title.ifBlank { "紫金花" })
+      .setContentTitle(title.ifBlank { "生花" })
       .setContentText(body)
       .setAutoCancel(true)
       .setPriority(NotificationCompat.PRIORITY_HIGH)

@@ -17,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Button
+import android.widget.ImageView
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -63,6 +64,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   private var appliedLight: Boolean? = null
   private var appliedBackdrop: Int? = null
   private var splashHeld = true
+  private var startupBranding: FrameLayout? = null
   private var loadingWanted = false
   private val loadingHandler = Handler(Looper.getMainLooper())
   private val startupTimeout = Runnable {
@@ -80,6 +82,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     if (!loading) {
       loadingHandler.removeCallbacks(startupTimeout)
       startupFailurePanel?.visibility = View.GONE
+      removeStartupBranding()
     }
     if (splashHeld) {
       if (!loading) splashHeld = false
@@ -102,7 +105,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     val splash = installSplashScreen()
     supportFragmentManager.fragmentFactory = RNScreensFragmentFactory()
     super.onCreate(savedInstanceState)
-    splash.setKeepOnScreenCondition { splashHeld }
+    splash.setKeepOnScreenCondition { !::root.isInitialized }
     splash.setOnExitAnimationListener { screen ->
       screen.remove()
       Log.i(TAG, "splash removed")
@@ -119,10 +122,36 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     ShellCapabilities.attach(this)
     onBackPressedDispatcher.addCallback(this, BackCallback())
     root = FrameLayout(this).apply { setBackgroundColor(canvas) }
+    showStartupBranding()
     setContentView(root)
     loadingHandler.postDelayed(startupTimeout, STARTUP_TIMEOUT_MS)
     startReactSurface()
     Log.i(TAG, "activity created")
+  }
+
+  private fun showStartupBranding() {
+    val density = resources.displayMetrics.density
+    fun dp(value: Int) = (value * density).toInt()
+    startupBranding = FrameLayout(this).apply {
+      setBackgroundColor(getColor(R.color.splash_background))
+      addView(ImageView(this@MainActivity).apply {
+        setImageResource(R.drawable.ic_splash_logo)
+        contentDescription = getString(R.string.app_name)
+        scaleType = ImageView.ScaleType.FIT_CENTER
+      }, FrameLayout.LayoutParams(dp(192), dp(192), Gravity.CENTER))
+      addView(TextView(this@MainActivity).apply {
+        text = getString(R.string.app_slogan)
+        textSize = 15f
+        letterSpacing = 0.08f
+        setTextColor(Color.parseColor("#DCD1C5"))
+        translationY = dp(100).toFloat()
+      }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+    }.also { root.addView(it, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)) }
+  }
+
+  private fun removeStartupBranding() {
+    startupBranding?.let { root.removeView(it) }
+    startupBranding = null
   }
 
   private fun startReactSurface() {
@@ -208,6 +237,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   private fun showStartupFailure() {
     if (!::root.isInitialized || isDestroyed || isFinishing) return
     splashHeld = false
+    removeStartupBranding()
     loadingWanted = false
     loadingHandler.removeCallbacks(startupTimeout)
     loadingHandler.removeCallbacks(revealLoading)
