@@ -152,6 +152,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   private fun removeStartupBranding() {
     startupBranding?.let { root.removeView(it) }
     startupBranding = null
+    applySystemBars()
   }
 
   private fun startReactSurface() {
@@ -313,7 +314,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   }
 
   private fun applySystemBars() {
-    val light = ShellAi.lightSurface
+    val light = if (startupBranding != null) false else ShellAi.lightSurface
     val backdrop = canvasColor()
     if (canvas != backdrop) {
       canvas = backdrop
