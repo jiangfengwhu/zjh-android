@@ -43,7 +43,7 @@ APK 版本维护在 config/apk-version.json；新版本递增 versionCode，不�
 
 新 APK 的发布顺序为：递增版本并提交源码 → publish:runtime → 在 zjh-dynamic 发布对应运行时的宿主包 → publish:apk。运行时指纹随 versionCode 改变，prepare:apk 要求线上宿主包匹配当前 APK 版本；不能仅递增版本后直接发布 APK。
 
-UI 变化走 dynamic 发布；原生变化需配套 APK 并协调 SDK、宿主与服务端。纯文档修改不构建或发布。
+UI 与纯 JS 的 SDK API 变化走 dynamic 发布，不因 SDK 大版本变化发 APK。作品与宿主按 SDK 大版本检查兼容；宿主与 APK 按运行时版本、RN/Hermes ABI 和原生依赖检查兼容。原生变化需配套 APK 并协调 SDK、宿主与服务端。纯文档修改不构建或发布。
 
 ## 更新
 
