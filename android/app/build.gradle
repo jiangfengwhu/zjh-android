@@ -8,9 +8,6 @@ def runtimeOutput = providers.exec {
 }
 runtimeOutput.result.get().assertNormalExitValue()
 def bundleRuntimeVersion = runtimeOutput.standardOutput.asText.get().trim()
-def platformSdk = new groovy.json.JsonSlurper().parse(file("../../config/application-platform.json")).sdk
-if (!(platformSdk ==~ /\d+\.\d+\.\d+/)) throw new GradleException("SDK version invalid")
-def applicationSdkMajor = platformSdk.tokenize(".")[0].toInteger()
 def apkVersion = new groovy.json.JsonSlurper().parse(file("../../config/apk-version.json"))
 
 /**
@@ -103,7 +100,6 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode apkVersion.versionCode
         versionName apkVersion.versionName
-        buildConfigField "int", "APPLICATION_SDK_MAJOR", "${applicationSdkMajor}"
         buildConfigField "String", "BUNDLE_RUNTIME_VERSION", "\"${bundleRuntimeVersion}\""
     }
     signingConfigs {
