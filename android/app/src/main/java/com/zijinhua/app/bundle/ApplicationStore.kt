@@ -6,13 +6,23 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 import java.security.MessageDigest
 
 /** Immutable application blobs. JS checks the public SDK contract before invoking this loader. */
 class ApplicationStore(private val context: Context) {
   private val root = File(context.filesDir, "applications")
 
+  private companion object {
+    val downloadLocks = ConcurrentHashMap<String, Any>()
+  }
+
   fun obtain(manifest: JSONObject): File {
+    val key = manifest.getString("appId") + "/" + manifest.getJSONObject("bundle").getString("sha256")
+    return synchronized(downloadLocks.computeIfAbsent(key) { Any() }) { obtainLocked(manifest) }
+  }
+
+  private fun obtainLocked(manifest: JSONObject): File {
     val appId = manifest.getString("appId")
     val releaseId = manifest.getString("releaseId")
     require(Regex("^[a-z][a-z0-9-]{0,63}$").matches(appId)) { "invalid application identity" }
@@ -23,7 +33,7 @@ class ApplicationStore(private val context: Context) {
     require(Regex("^[a-f0-9]{64}$").matches(sha) && bytes in 1..50_000_000) { "invalid application bundle" }
     val directory = File(root, appId).apply { mkdirs() }
     val file = File(directory, "$sha.bundle")
-    if (valid(file, sha, bytes)) return file
+    if (complete(file, bytes)) return file
     val temporary = File(directory, "$sha.tmp")
     try {
       val aliases = try {
@@ -32,7 +42,7 @@ class ApplicationStore(private val context: Context) {
       val sharedAsset = aliases.optString(sha)
       val seedPath = if (sharedAsset.matches(Regex("^jolly/[a-z0-9_]+\\.mp4$"))) sharedAsset else "applications/$appId/$sha.bundle"
       context.assets.open(seedPath).use { input -> temporary.outputStream().use { input.copyTo(it) } }
-      if (valid(temporary, sha, bytes) && temporary.renameTo(file)) return file
+      if (complete(temporary, bytes) && temporary.renameTo(file)) return file
     } catch (_: java.io.FileNotFoundException) { /* The application is not included in this APK seed. */ }
     temporary.delete()
     val connection = URL("https://zjh-cdn.297782.xyz/v1/app/$sha").openConnection() as HttpURLConnection
@@ -53,7 +63,7 @@ class ApplicationStore(private val context: Context) {
           }
         }
       }
-      check(valid(temporary, sha, bytes)) { "application checksum mismatch" }
+      check(complete(temporary, bytes)) { "application download incomplete" }
       check(temporary.renameTo(file)) { "application cache write failed" }
       Log.i("ApplicationStore", "downloaded app=$appId release=$releaseId bytes=$bytes")
       return file
@@ -82,17 +92,5 @@ class ApplicationStore(private val context: Context) {
     return result
   }
 
-  private fun valid(file: File, sha: String, bytes: Long): Boolean {
-    if (!file.isFile || file.length() != bytes) return false
-    val digest = MessageDigest.getInstance("SHA-256")
-    file.inputStream().use { input ->
-      val buffer = ByteArray(32768)
-      while (true) {
-        val count = input.read(buffer)
-        if (count < 0) break
-        digest.update(buffer, 0, count)
-      }
-    }
-    return digest.digest().joinToString("") { "%02x".format(it) } == sha
-  }
+  private fun complete(file: File, bytes: Long): Boolean = file.isFile && file.length() == bytes
 }

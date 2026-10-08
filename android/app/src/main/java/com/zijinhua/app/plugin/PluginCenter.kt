@@ -25,6 +25,7 @@ import java.util.concurrent.TimeUnit
 object PluginCenter {
   private const val TAG = "PluginCenter"
   private val io = Executors.newSingleThreadExecutor()
+  private val downloads = Executors.newFixedThreadPool(3)
   private var appContext: Context? = null
   private var appContextId = 0
   var onBundleLoading: ((Boolean) -> Unit)? = null
@@ -148,7 +149,7 @@ object PluginCenter {
     registry.register("shell", "prepareApplication", PluginHandler { payload ->
       val context = appContext ?: throw IllegalStateException("plugin center not installed")
       val manifest = JSONObject(payload)
-      io.submit<Boolean> {
+      downloads.submit<Boolean> {
         ApplicationStore(context).obtain(manifest)
         ApplicationStore(context).assets(manifest)
         true

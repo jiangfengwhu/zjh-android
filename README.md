@@ -28,7 +28,7 @@ prepare:apk 下载线上宿主 vendor/app 并校验哈希与运行时契约，�
 
 Release 开启 R8 代码与资源裁剪、内置 bundle 压缩；独立 DEX 插件使用的公共桥接类型保留名称与成员。原生共享库保持直接加载，不以安装后额外解压换取下载体积。
 
-锁文件不变时复用依赖与 Gradle、CMake/Ninja、.cache/apk 缓存，不常规 clean；仍须校验兼容与完整性。
+锁文件不变时复用依赖与 Gradle、CMake/Ninja、.cache/apk 缓存，不常规 clean；仍须校验运行时兼容与文件完整性。
 
 ## 发布
 
@@ -47,11 +47,11 @@ UI 与纯 JS 的 SDK API 变化走 dynamic 发布，不因 SDK 大版本变化�
 
 ## 更新
 
-宿主请求 `/v1/updates?apkVersionCode=<本机版本>`，同时检查 APK 与动态清单。新版 APK 由用户点击后在应用内下载、校验，再调用 installPackage 打开系统安装界面；不跳浏览器、不静默安装，覆盖安装保留数据。
+宿主请求 `/v1/updates?apkVersionCode=<本机版本>`，同时检查 APK 与动态清单。新版 APK 由用户点击后在应用内下载、确认文件长度，再调用 installPackage 打开系统安装界面；不跳浏览器、不静默安装，覆盖安装保留数据。
 
 RN 由 AppCompatActivity 的 FrameLayout 直接承载 ReactSurface。宿主根布局完成且导航就绪后调用 bundleReady，确认包启动健康并释放原生启动图；这不代表首页数据加载完成或屏幕已经绘制。随后延迟 1.5 秒，在后台注册 WorkManager 更新任务、恢复提醒和执行常规旧包清理。后台任务可通过 Configuration.Provider 按需初始化 WorkManager。
 
-Release 冷启动由 Application 启动 ShellStartup 后台任务：执行 prepareBoot，恢复 APK 内置包、处理失败回退、激活已暂存更新并准备固定 vendor 路径，再注册内置桥接和加载当前版本的 DEX 插件。任务完成后才在主线程启动 ReactHost 并创建 ReactSurface，避免提前捕获旧 vendor 路径或未注册的原生视图。首次安装或 APK 升级仍会复制并计算内置包哈希，激活暂存更新仍会重新校验包哈希；常规回收统一在 bundleReady 后延迟执行。重载后的 bundleReady 也触发回收，服务注册与提醒恢复每进程只执行一次。
+Release 冷启动由 Application 启动 ShellStartup 后台任务：执行 prepareBoot，恢复 APK 内置包、处理失败回退、激活已暂存更新并准备固定 vendor 路径，再注册内置桥接和加载当前版本的 DEX 插件。任务完成后才在主线程启动 ReactHost 并创建 ReactSurface，避免提前捕获旧 vendor 路径或未注册的原生视图。首次安装或 APK 升级仍会复制内置包并计算缓存标识，客户端不再计算或比对下载文件的 SHA-256，激活暂存更新只检查文件存在且非空；常规回收统一在 bundleReady 后延迟执行。重载后的 bundleReady 也触发回收，服务注册与提醒恢复每进程只执行一次。
 
 准备失败或 app 包加载失败时退出启动图并显示原生恢复页；启动 30 秒仍未收到 bundleReady 时也显示恢复页，可重试或返回。准备失败重试重新执行准备任务，已有 RN 容器时重试重载 ReactHost；失败展示不会清除 boot.pending，成功仍由 bundleReady 确认。syncPlugins 保留兼容入口，当前版本已经在启动时注册，不重复加载同一份 DEX；显式重载或激活新版本才重新注册。
 
@@ -59,7 +59,7 @@ Release 冷启动由 Application 启动 ShellStartup 后台任务：执行 prepa
 
 启动性能使用 Release 真机多次测量，区分普通冷启动、首次安装或升级、更新激活与失败回退。JS 就绪日志不能代替实际显示时间；比较同类样本的中位数与 P95，不以单次升级启动推断提速。离线、深链和登录恢复也需验证。
 
-APK 不绑定 SDK 大版本，宿主动态更新按原生运行时检查兼容。RN/Hermes ABI 或原生行为破坏旧应用兼容时，SDK 大版本必须同步递增；发布器阻止同大版本的 ABI 变化。作品兼容由宿主按 SDK 大版本和最低 API 判断，APK 保留底层运行时、下载哈希和 vendor 配对校验。
+APK 不绑定 SDK 大版本，宿主动态更新按原生运行时检查兼容。RN/Hermes ABI 或原生行为破坏旧应用兼容时，SDK 大版本必须同步递增；发布器阻止同大版本的 ABI 变化。作品兼容由宿主按 SDK 大版本和最低 API 判断，APK 保留底层运行时和 vendor 配对校验，下载文件按状态及长度确认完整，哈希字段仅作缓存与版本定位。
 
 分享使用 zijinhua.297782.xyz 的 HTTPS /posts/、/applications/ 链接，安装后由 Android App Links 打开。自定义 zijinhua://posts/<id>、zijinhua://applications/<id> 供网页按钮兜底。服务端 /.well-known/assetlinks.json 中的 SHA-256 指纹须匹配分发签名证书；更换签名时同步更新。验证使用 adb shell pm verify-app-links --re-verify com.zijinhua.app 与 adb shell pm get-app-links com.zijinhua.app，冷启动和 onNewIntent 均交给宿主路由处理。
 

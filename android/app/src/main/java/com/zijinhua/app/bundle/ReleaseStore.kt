@@ -180,7 +180,7 @@ class ReleaseStore(private val context: Context) {
       try {
         validate(staged)
         if (id in badIds()) throw IllegalArgumentException("这一套之前启动失败")
-        verifyBlobs(staged)
+        requireBlobs(staged)
       } catch (error: Exception) {
         File(incoming, "$id.json").delete()
         throw error
@@ -378,14 +378,10 @@ class ReleaseStore(private val context: Context) {
     return doc.optJSONObject("vendor") != null
   }
 
-  private fun verifyBlobs(doc: JSONObject) {
+  private fun requireBlobs(doc: JSONObject) {
     for (sha in blobShas(doc)) {
       val file = blob(sha)
       if (!file.isFile || file.length() == 0L) throw IllegalStateException("配套缺文件 ${sha.take(12)}")
-      if (sha256(file) != sha) {
-        file.delete()
-        throw IllegalStateException("配套校验失败 ${sha.take(12)}")
-      }
     }
   }
 
@@ -445,7 +441,6 @@ class ReleaseStore(private val context: Context) {
     }
     val data = httpGetBytes(url, readTimeoutMs)
     if (data.size.toLong() != bytes) throw IllegalStateException("配套大小不对 ${sha.take(12)}")
-    if (sha256(data) != sha) throw IllegalStateException("配套校验失败 ${sha.take(12)}")
     blobs.mkdirs()
     writeAtomic(file, data)
     Log.i(TAG, "downloaded blob ${sha.take(12)} bytes=${data.size}")
@@ -509,21 +504,6 @@ class ReleaseStore(private val context: Context) {
     val info = context.packageManager.getPackageInfo(context.packageName, 0)
     return info.lastUpdateTime.toString()
   }
-
-  private fun sha256(file: File): String {
-    val digest = MessageDigest.getInstance("SHA-256")
-    file.inputStream().use { input ->
-      val buffer = ByteArray(65536)
-      while (true) {
-        val read = input.read(buffer)
-        if (read < 0) break
-        digest.update(buffer, 0, read)
-      }
-    }
-    return hex(digest.digest())
-  }
-
-  private fun sha256(bytes: ByteArray): String = hex(MessageDigest.getInstance("SHA-256").digest(bytes))
 
   private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
 
