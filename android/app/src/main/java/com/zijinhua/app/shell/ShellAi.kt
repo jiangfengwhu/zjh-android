@@ -218,14 +218,7 @@ object ShellAi {
     val model = input.optString("model").ifBlank { chosen.optString("model") }
     if (!secureEndpoint(chosen.optString("baseUrl"))) return failure("INVALID_REQUEST", "请将 AI 引擎地址改为 HTTPS，且不要在地址中填写密钥")
     val messages = input.optJSONArray("messages") ?: return failure("INVALID_REQUEST", "请提供对话消息")
-    if (messages.length() !in 1..128) return failure("INVALID_REQUEST", "对话消息数量无效")
-    var characters = 0
-    for (index in 0 until messages.length()) {
-      val message = messages.optJSONObject(index) ?: return failure("INVALID_REQUEST", "对话消息无效")
-      if (message.optString("role") !in listOf("system", "user", "assistant") || message.opt("content") !is String) return failure("INVALID_REQUEST", "对话消息无效")
-      characters += message.getString("content").length
-      if (characters > 128000) return failure("INVALID_REQUEST", "对话内容过长，请精简后重试")
-    }
+    if (!validMessages(messages)) return failure("INVALID_REQUEST", "对话内容或多模态附件无效")
     val temperature = input.optDouble("temperature", 1.0)
     val maxTokens = input.optDouble("maxTokens", 2048.0)
     if (!temperature.isFinite() || temperature !in 0.0..2.0 || !maxTokens.isFinite() || maxTokens !in 1.0..8192.0 || maxTokens % 1.0 != 0.0) return failure("INVALID_REQUEST", "AI 生成参数无效")
@@ -281,6 +274,52 @@ object ShellAi {
   }
 
   private fun failure(code: String, message: String) = JSONObject().put("ok", false).put("code", code).put("error", message)
+
+  private fun validMessages(messages: JSONArray): Boolean {
+    if (messages.length() !in 1..128) return false
+    var characters = 0
+    var attachments = 0
+    var mediaSize = 0
+    val base64 = Regex("[A-Za-z0-9+/]+={0,2}")
+    for (index in 0 until messages.length()) {
+      val message = messages.optJSONObject(index) ?: return false
+      val role = message.optString("role")
+      if (role !in listOf("system", "user", "assistant")) return false
+      when (val content = message.opt("content")) {
+        is String -> characters += content.length
+        is JSONArray -> {
+          if (role != "user" || content.length() !in 1..17) return false
+          for (partIndex in 0 until content.length()) {
+            val part = content.optJSONObject(partIndex) ?: return false
+            when (part.optString("type")) {
+              "text" -> { if (part.opt("text") !is String) return false; characters += part.getString("text").length }
+              "image_url" -> {
+                val image = part.optJSONObject("image_url") ?: return false
+                val url = image.optString("url")
+                val detail = image.optString("detail", "auto")
+                if (detail !in listOf("auto", "low", "high")) return false
+                val valid = if (url.startsWith("https://")) try {
+                  val parsed = URL(url); parsed.host.isNotBlank() && parsed.userInfo == null && url.length <= 4096
+                } catch (_: Exception) { false } else Regex("data:image/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}").matches(url)
+                if (!valid) return false
+                attachments++; mediaSize += url.length
+              }
+              "input_audio" -> {
+                val audio = part.optJSONObject("input_audio") ?: return false
+                val data = audio.optString("data")
+                if (audio.optString("format") !in listOf("wav", "mp3") || !base64.matches(data)) return false
+                attachments++; mediaSize += data.length
+              }
+              else -> return false
+            }
+          }
+        }
+        else -> return false
+      }
+      if (characters > 128000 || attachments > 16 || mediaSize > 8 * 1024 * 1024) return false
+    }
+    return true
+  }
 
   private fun secureEndpoint(baseUrl: String): Boolean = try {
     val url = URL(baseUrl)
