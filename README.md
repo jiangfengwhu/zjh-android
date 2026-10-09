@@ -24,11 +24,13 @@ Windows 使用 gradlew.bat。输出 android/app/build/outputs/apk/release/app-re
 
 Windows 构建音频原生依赖需要 Git Bash 及其 Unix 工具。若脚本提示找不到 mkdir/rm，需将 Git 安装目录的 usr/bin 和 mingw64/bin 加入当前构建进程 PATH，再运行 Gradle。
 
-prepare:apk 下载线上宿主 vendor/app 并校验哈希与运行时契约，不内置 plugin 应用。应用预热与打开按 appId/releaseId 共享内存中的准备任务和已完成路径（最多 32 组）；命中后直接执行，不重复 obtain 或遍历资源。最多 3 个作品同时预热，每个作品以 2 路下载 bundle 和资源，全局资源池最多 6 路。下载不等待手势或 JS 空闲，客户端不做公开版本联网验签或下载文件 SHA-256 比对。Jolly 制作进度页及视频属于宿主；准备资源时清理旧 Jolly 应用 seed。
+prepare:apk 下载线上宿主 vendor/app 并校验哈希与运行时契约，不内置 plugin 应用。应用预热与打开按 appId/releaseId 共享内存中的准备任务和已完成路径（最多 32 组）；命中后直接执行，不重复 obtain 或遍历资源。原生最多同时准备 3 个作品，每个作品以 2 路下载 bundle 和资源，全局资源池最多 6 路；可见页与后台任务的名额由 [宿主下载调度](https://github.com/jiangfengwhu/zjh-dynamic/blob/main/README.md) 分配。下载不等待手势或 JS 空闲，客户端不做公开版本联网验签或下载文件 SHA-256 比对。Jolly 制作进度页及视频属于宿主；准备资源时清理旧 Jolly 应用 seed。
 
 Release 开启 R8 代码与资源裁剪、内置 bundle 压缩；独立 DEX 插件使用的公共桥接类型保留名称与成员。原生共享库保持直接加载，不以安装后额外解压换取下载体积。
 
 作品准备有 90 秒总时限；网络连接超时 10 秒、读取超时 15 秒，连续 15 秒不足 32 KiB 的传输由看门狗关闭。取消和失败关闭同任务的连接并停止其他资源 worker，已完整下载的文件保留；不做断点续传。桥接成功的 Promise 直接在工作线程 resolve，具体 UI 操作仍由其实现调度到主线程。
+
+作品资源使用固定 64 个分段锁，同一个 appId/资源哈希始终使用同一把锁，锁数量不随下载历史增长；不同资源映射到同一分段时串行执行。
 
 AI 请求体及附件校验由 dynamic 的 RN 层维护。原生 complete 只在已配置引擎地址下发送 RN 提供的 body 和相对 path，注入保存的密钥，禁止重定向，并限制请求及响应大小、处理取消和超时。文本 SSE 仍在原生解码，约每 40ms 合并增量通知 RN；旧宿主的 messages 信封保留兼容转换。新增请求参数不在 Kotlin 枚举，新增响应协议需协调解码器。
 
@@ -47,7 +49,7 @@ APK 版本维护在 config/apk-version.json；新版本递增 versionCode，不�
 
 新 APK 的发布顺序为：递增版本并提交源码 → publish:runtime → 在 zjh-dynamic 发布对应运行时的宿主包 → publish:apk。运行时指纹随 versionCode 改变，prepare:apk 要求线上宿主包匹配当前 APK 版本；不能仅递增版本后直接发布 APK。
 
-UI 与纯 JS 的 SDK API 变化走 dynamic 发布，不因 SDK 大版本变化发 APK。作品与宿主按 SDK 大版本检查兼容；宿主与 APK 按运行时版本、RN/Hermes ABI 和原生依赖检查兼容。原生变化需配套 APK 并协调 SDK、宿主与服务端。纯文档修改不构建或发布。
+UI 与纯 JS 的 SDK API 变化走 dynamic 发布，不因 SDK 大版本变化发 APK。作品 SDK 兼容与 SDK 发布顺序见 [dynamic README](https://github.com/jiangfengwhu/zjh-dynamic/blob/main/README.md)。宿主与 APK 按运行时版本、RN/Hermes ABI 和原生依赖检查兼容；原生变化需配套 APK 并协调 SDK、宿主与服务端。纯文档修改不构建或发布。
 
 ## 更新
 
@@ -59,11 +61,13 @@ Release 冷启动由 Application 启动 ShellStartup 后台任务：执行 prepa
 
 准备失败或 app 包加载失败时退出启动图并显示原生恢复页；启动 30 秒仍未收到 bundleReady 时也显示恢复页，可重试或返回。准备失败重试重新执行准备任务，已有 RN 容器时重试重载 ReactHost；失败展示不会清除 boot.pending，成功仍由 bundleReady 确认。syncPlugins 保留兼容入口，当前版本已经在启动时注册，不重复加载同一份 DEX；显式重载或激活新版本才重新注册。
 
+上次启动未收到 bundleReady 时，下一次冷启动仍回退到上一套或 APK 内置包以保证可启动；未确认不等于实际崩溃，也可能是系统回收进程，因此不写版本黑名单。相同动态版本仍可自动暂存或手动重试，已有的旧黑名单文件不再参与判断。
+
 原生 ReleaseCheck 仍由 WorkManager 每 30 分钟检查并暂存动态包；它与宿主页面的手动刷新、APK 安装流程分开。原生补丁及升级注意事项见下文。
 
 启动性能使用 Release 真机多次测量，区分普通冷启动、首次安装或升级、更新激活与失败回退。JS 就绪日志不能代替实际显示时间；比较同类样本的中位数与 P95，不以单次升级启动推断提速。离线、深链和登录恢复也需验证。
 
-APK 不绑定 SDK 大版本，宿主动态更新按原生运行时检查兼容。RN/Hermes ABI 或原生行为破坏旧应用兼容时，SDK 大版本必须同步递增；发布器阻止同大版本的 ABI 变化。作品兼容要求 SDK 大版本一致、实际加载的宿主完整 SDK 版本不低于作品构建所用 SDK 版本；不维护独立的最低平台版本。APK 保留底层运行时和 vendor 配对校验，下载文件按状态及长度确认完整，哈希字段仅作缓存与版本定位。
+APK 不绑定 SDK 大版本，宿主动态更新按原生运行时检查兼容。RN/Hermes ABI 或原生行为破坏旧应用兼容时，SDK 大版本必须同步递增；发布器阻止同大版本的 ABI 变化。APK 保留底层运行时和 vendor 配对校验；手机客户端下载文件按状态及长度确认完整，哈希字段用于缓存与版本定位。维护者的 prepare:apk 等构建发布工具仍校验产物哈希。
 
 分享使用 zijinhua.297782.xyz 的 HTTPS /posts/、/applications/ 链接，安装后由 Android App Links 打开。自定义 zijinhua://posts/<id>、zijinhua://applications/<id> 供网页按钮兜底。服务端 /.well-known/assetlinks.json 中的 SHA-256 指纹须匹配分发签名证书；更换签名时同步更新。验证使用 adb shell pm verify-app-links --re-verify com.zijinhua.app 与 adb shell pm get-app-links com.zijinhua.app，冷启动和 onNewIntent 均交给宿主路由处理。
 

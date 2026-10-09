@@ -71,10 +71,10 @@ class ReleaseStore(private val context: Context) {
       ensureReady()
       val pending = File(root, "boot.pending")
       if (pending.isFile) {
-        Log.i(TAG, "previous boot did not become healthy, rolling back")
+        Log.i(TAG, "previous boot was not confirmed, rolling back without blocking retry")
         // 旧版标记为 boot；新版标记绑定版本，切换中断时不误伤仍在运行的旧版本。
         val trial = pending.readText().trim()
-        if (trial == "boot" || trial == readPointer("current")) rollbackAfterBadBoot()
+        if (trial == "boot" || trial == readPointer("current")) rollbackAfterUnconfirmedBoot()
         pending.delete()
       }
       try {
@@ -134,11 +134,6 @@ class ReleaseStore(private val context: Context) {
     val release = JSONObject(text)
     validate(release)
     val id = release.getString("id")
-    if (id in badIds()) {
-      Log.i(TAG, "release skipped, it failed to boot before id=$id")
-      clearIncoming(null)
-      return
-    }
     val active = readActive()
     if (active != null && sameContent(active, release)) {
       Log.i(TAG, "release already current id=$id")
@@ -179,7 +174,6 @@ class ReleaseStore(private val context: Context) {
       }
       try {
         validate(staged)
-        if (id in badIds()) throw IllegalArgumentException("这一套之前启动失败")
         requireBlobs(staged)
       } catch (error: Exception) {
         File(incoming, "$id.json").delete()
@@ -206,12 +200,11 @@ class ReleaseStore(private val context: Context) {
     val usable = active != null && blobsPresent(active)
     if (recorded.isFile && recorded.readText().trim() == stamp && usable) return
     Log.i(TAG, "resetting to the release inside the apk stamp=$stamp usable=$usable")
-    resetToSeed(stamp, keepBad = false)
+    resetToSeed(stamp)
   }
 
   /** 新装或升级了 APK，或者现行的一套坏了：清空，改用 APK 里自带的 vendor 和 app。 */
-  private fun resetToSeed(stamp: String, keepBad: Boolean) {
-    val bad = if (keepBad) badIds() else emptySet()
+  private fun resetToSeed(stamp: String) {
     root.deleteRecursively()
     legacyCleanup()
     blobs.mkdirs()
@@ -231,7 +224,6 @@ class ReleaseStore(private val context: Context) {
     writeAtomic(File(docs, "$name.json"), doc.toString().toByteArray(Charsets.UTF_8))
     writePointer("current", name)
     File(root, "apk-stamp").writeText(stamp)
-    if (bad.isNotEmpty()) File(root, "bad.txt").writeText(bad.joinToString("\n"))
     Log.i(TAG, "seeded release $name vendor=${vendor.second} app=${app?.second ?: 0}")
   }
 
@@ -272,15 +264,14 @@ class ReleaseStore(private val context: Context) {
     }
   }
 
-  private fun rollbackAfterBadBoot() {
+  private fun rollbackAfterUnconfirmedBoot() {
     val name = readPointer("current")
-    val active = readActive()
-    val id = active?.optString("id").orEmpty()
     if (name != null && name.startsWith("seed-")) {
       Log.e(TAG, "the release inside the apk did not boot either, keeping it")
       return
     }
-    if (id.isNotEmpty()) addBad(id)
+    // Missing bundleReady can mean OS process reclamation, not a broken release.
+    // Recover a known package, but allow both automatic and manual retries.
     val previous = readPointer("previous")
     val previousDoc = if (previous != null) readDoc(previous) else null
     if (previous != null && previousDoc != null && blobsPresent(previousDoc)) {
@@ -288,7 +279,7 @@ class ReleaseStore(private val context: Context) {
       writePointer("previous", null)
       Log.i(TAG, "rolled back to $previous")
     } else {
-      resetToSeed(installedStamp(), keepBad = true)
+      resetToSeed(installedStamp())
     }
     syncLive()
   }
@@ -447,19 +438,6 @@ class ReleaseStore(private val context: Context) {
   }
 
   private fun blob(sha: String): File = File(blobs, sha)
-
-  private fun badIds(): Set<String> {
-    val file = File(root, "bad.txt")
-    if (!file.isFile) return emptySet()
-    return file.readLines().map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-  }
-
-  private fun addBad(id: String) {
-    val next = badIds() + id
-    root.mkdirs()
-    File(root, "bad.txt").writeText(next.joinToString("\n"))
-    Log.i(TAG, "marked release as bad id=$id")
-  }
 
   private fun readPointer(name: String): String? {
     val file = File(root, name)

@@ -23,7 +23,8 @@ class ApplicationStore(private val context: Context) {
   private val root = File(context.filesDir, "applications")
 
   private companion object {
-    val downloadLocks = ConcurrentHashMap<String, Any>()
+    // Fixed stripes bound memory while keeping the same immutable blob serialized.
+    val downloadLocks = Array(64) { Any() }
     val resources = Executors.newFixedThreadPool(6)
     val preparing = ConcurrentHashMap<String, Preparation>()
     val prepared = LinkedHashMap<String, PreparedApplication>(32, 0.75f, true)
@@ -149,7 +150,8 @@ class ApplicationStore(private val context: Context) {
 
   private fun obtain(manifest: JSONObject, job: Preparation): File {
     val key = manifest.getString("appId") + "/" + manifest.getJSONObject("bundle").getString("sha256")
-    return synchronized(downloadLocks.computeIfAbsent(key) { Any() }) { job.check(); obtainLocked(manifest, job) }
+    val lock = downloadLocks[(key.hashCode() and Int.MAX_VALUE) % downloadLocks.size]
+    return synchronized(lock) { job.check(); obtainLocked(manifest, job) }
   }
 
   private fun obtainLocked(manifest: JSONObject, job: Preparation): File {
