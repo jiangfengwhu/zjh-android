@@ -63,7 +63,7 @@ Release 冷启动由 Application 启动 ShellStartup 后台任务：执行 prepa
 
 启动性能使用 Release 真机多次测量，区分普通冷启动、首次安装或升级、更新激活与失败回退。JS 就绪日志不能代替实际显示时间；比较同类样本的中位数与 P95，不以单次升级启动推断提速。离线、深链和登录恢复也需验证。
 
-APK 不绑定 SDK 大版本，宿主动态更新按原生运行时检查兼容。RN/Hermes ABI 或原生行为破坏旧应用兼容时，SDK 大版本必须同步递增；发布器阻止同大版本的 ABI 变化。作品兼容由宿主只按 SDK 大版本判断，APK 保留底层运行时和 vendor 配对校验，下载文件按状态及长度确认完整，哈希字段仅作缓存与版本定位。
+APK 不绑定 SDK 大版本，宿主动态更新按原生运行时检查兼容。RN/Hermes ABI 或原生行为破坏旧应用兼容时，SDK 大版本必须同步递增；发布器阻止同大版本的 ABI 变化。作品兼容由宿主按 SDK 大版本和最低 API 判断，APK 保留底层运行时和 vendor 配对校验，下载文件按状态及长度确认完整，哈希字段仅作缓存与版本定位。
 
 分享使用 zijinhua.297782.xyz 的 HTTPS /posts/、/applications/ 链接，安装后由 Android App Links 打开。自定义 zijinhua://posts/<id>、zijinhua://applications/<id> 供网页按钮兜底。服务端 /.well-known/assetlinks.json 中的 SHA-256 指纹须匹配分发签名证书；更换签名时同步更新。验证使用 adb shell pm verify-app-links --re-verify com.zijinhua.app 与 adb shell pm get-app-links com.zijinhua.app，冷启动和 onNewIntent 均交给宿主路由处理。
 
