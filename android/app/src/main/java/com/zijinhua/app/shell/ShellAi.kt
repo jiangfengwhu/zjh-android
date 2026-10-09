@@ -215,18 +215,18 @@ object ShellAi {
     if (wanted.isNotBlank() && provider == null) return failure("PROVIDER_NOT_FOUND", "选定的 AI 引擎已移除，请重新选择")
     if (provider == null && items.length() > 0) provider = items.getJSONObject(0)
     val chosen = provider ?: return failure("NOT_CONFIGURED", "请先在我的页面配置 AI 引擎")
-    val model = input.optString("model").ifBlank { chosen.optString("model") }
     if (!secureEndpoint(chosen.optString("baseUrl"))) return failure("INVALID_REQUEST", "请将 AI 引擎地址改为 HTTPS，且不要在地址中填写密钥")
-    val messages = input.optJSONArray("messages") ?: return failure("INVALID_REQUEST", "请提供对话消息")
-    if (!validMessages(messages)) return failure("INVALID_REQUEST", "对话内容或多模态附件无效")
-    val temperature = input.optDouble("temperature", 1.0)
-    val maxTokens = input.optDouble("maxTokens", 2048.0)
-    if (!temperature.isFinite() || temperature !in 0.0..2.0 || !maxTokens.isFinite() || maxTokens !in 1.0..8192.0 || maxTokens % 1.0 != 0.0) return failure("INVALID_REQUEST", "AI 生成参数无效")
-    val endpoint = endpoint(chosen.getString("baseUrl"))
     val streaming = input.optBoolean("stream")
-    val body = JSONObject().put("model", model).put("messages", messages).put("stream", streaming)
-    if (input.has("temperature")) body.put("temperature", temperature)
-    if (input.has("maxTokens")) body.put("max_tokens", maxTokens.toInt())
+    // RN owns the protocol and modality validation. Keep the old envelope for older host bundles.
+    val body = if (input.has("body")) input.optJSONObject("body") else legacyBody(input, chosen.optString("model"))
+    if (body == null || body.length() == 0) return failure("INVALID_REQUEST", "AI 请求内容无效")
+    val bytes = body.toString().toByteArray(Charsets.UTF_8)
+    if (bytes.size > 12 * 1024 * 1024) return failure("INVALID_REQUEST", "AI 请求内容过大")
+    val model = body.optString("model", chosen.optString("model"))
+    val path = if (input.has("path")) input.optString("path") else
+      if (chosen.getString("baseUrl").trimEnd('/').endsWith("/chat/completions")) "" else "/chat/completions"
+    if (!Regex("(/[A-Za-z0-9_-]+)*").matches(path)) return failure("INVALID_REQUEST", "AI 请求路径无效")
+    val endpoint = chosen.getString("baseUrl").trimEnd('/') + path
     var connection: HttpURLConnection? = null
     return try {
       val request = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -241,7 +241,7 @@ object ShellAi {
       connection = request
       state.connection = request
       if (state.cancelled.get()) return failure("CANCELLED", "已取消生成")
-      request.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+      request.outputStream.use { it.write(bytes) }
       val code = request.responseCode
       if (code !in 200..299) {
         // Provider error bodies may echo credentials or private prompts; never return them.
@@ -275,61 +275,20 @@ object ShellAi {
 
   private fun failure(code: String, message: String) = JSONObject().put("ok", false).put("code", code).put("error", message)
 
-  private fun validMessages(messages: JSONArray): Boolean {
-    if (messages.length() !in 1..128) return false
-    var characters = 0
-    var attachments = 0
-    var mediaSize = 0
-    val base64 = Regex("[A-Za-z0-9+/]+={0,2}")
-    for (index in 0 until messages.length()) {
-      val message = messages.optJSONObject(index) ?: return false
-      val role = message.optString("role")
-      if (role !in listOf("system", "user", "assistant")) return false
-      when (val content = message.opt("content")) {
-        is String -> characters += content.length
-        is JSONArray -> {
-          if (role != "user" || content.length() !in 1..17) return false
-          for (partIndex in 0 until content.length()) {
-            val part = content.optJSONObject(partIndex) ?: return false
-            when (part.optString("type")) {
-              "text" -> { if (part.opt("text") !is String) return false; characters += part.getString("text").length }
-              "image_url" -> {
-                val image = part.optJSONObject("image_url") ?: return false
-                val url = image.optString("url")
-                val detail = image.optString("detail", "auto")
-                if (detail !in listOf("auto", "low", "high")) return false
-                val valid = if (url.startsWith("https://")) try {
-                  val parsed = URL(url); parsed.host.isNotBlank() && parsed.userInfo == null && url.length <= 4096
-                } catch (_: Exception) { false } else Regex("data:image/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}").matches(url)
-                if (!valid) return false
-                attachments++; mediaSize += url.length
-              }
-              "input_audio" -> {
-                val audio = part.optJSONObject("input_audio") ?: return false
-                val data = audio.optString("data")
-                if (audio.optString("format") !in listOf("wav", "mp3") || !base64.matches(data)) return false
-                attachments++; mediaSize += data.length
-              }
-              else -> return false
-            }
-          }
-        }
-        else -> return false
-      }
-      if (characters > 128000 || attachments > 16 || mediaSize > 8 * 1024 * 1024) return false
-    }
-    return true
+  /** Compatibility for envelopes sent by host bundles predating RN request assembly. */
+  private fun legacyBody(input: JSONObject, defaultModel: String): JSONObject? {
+    val messages = input.optJSONArray("messages") ?: return null
+    val body = JSONObject().put("model", input.optString("model").ifBlank { defaultModel })
+      .put("messages", messages).put("stream", input.optBoolean("stream"))
+    if (input.has("temperature")) body.put("temperature", input.get("temperature"))
+    if (input.has("maxTokens")) body.put("max_tokens", input.get("maxTokens"))
+    return body
   }
 
   private fun secureEndpoint(baseUrl: String): Boolean = try {
     val url = URL(baseUrl)
     url.protocol == "https" && url.host.isNotBlank() && url.userInfo == null && url.query == null && url.ref == null
   } catch (_: Exception) { false }
-
-  private fun endpoint(baseUrl: String): String {
-    val trimmed = baseUrl.trim().trimEnd('/')
-    return if (trimmed.endsWith("/chat/completions")) trimmed else "$trimmed/chat/completions"
-  }
 
   private fun readProviders(context: Context): JSONArray {
     val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_PROVIDERS, "[]") ?: "[]"
