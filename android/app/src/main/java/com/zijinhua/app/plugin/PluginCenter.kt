@@ -148,10 +148,21 @@ object PluginCenter {
     registry.register("shell", "prepareApplication", PluginHandler { payload ->
       val context = appContext ?: throw IllegalStateException("plugin center not installed")
       val manifest = JSONObject(payload)
-      downloads.submit<Boolean> {
+      val task = downloads.submit<Boolean> {
         ApplicationStore(context).prepare(manifest)
         true
-      }.get(180, TimeUnit.SECONDS)
+      }
+      try { task.get(95, TimeUnit.SECONDS) } catch (error: Exception) {
+        ApplicationStore(context).cancelPreparation(manifest.getString("appId"), manifest.getString("releaseId"))
+        task.cancel(true)
+        throw error
+      }
+      JSONObject().put("ok", true).toString()
+    })
+    registry.register("shell", "cancelApplicationPreparation", PluginHandler { payload ->
+      val context = appContext ?: throw IllegalStateException("plugin center not installed")
+      val input = JSONObject(payload)
+      ApplicationStore(context).cancelPreparation(input.getString("appId"), input.getString("releaseId"))
       JSONObject().put("ok", true).toString()
     })
     registry.register("shell", "reloadApplications", PluginHandler { _ ->

@@ -35,10 +35,8 @@ class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePlug
           } finally { aiRequests.remove(id) }
         } else PluginCenter.registry.invoke(pluginId, method, payload)
         Log.i(TAG, "call $pluginId.$method bytes=${result.length}")
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-          promise.resolve(result)
-          Log.i(TAG, "resolved $pluginId.$method")
-        }
+        promise.resolve(result)
+        Log.i(TAG, "resolved $pluginId.$method")
       } catch (error: Exception) {
         Log.e(TAG, "call failed $pluginId.$method", error)
         promise.reject("PLUGIN_ERROR", error.message, error)
