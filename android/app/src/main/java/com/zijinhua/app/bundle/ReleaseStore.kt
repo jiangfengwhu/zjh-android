@@ -9,6 +9,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorCompletionService
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** 当前这一套里的一个 DEX 插件：类名和 DEX 文件。 */
 data class PluginFile(val id: String, val className: String, val dex: File)
@@ -145,16 +149,18 @@ class ReleaseStore(private val context: Context) {
       Log.i(TAG, "release already staged id=$id")
       return
     }
+    val blobs = mutableListOf<Pair<JSONObject, String>>()
     val vendor = release.getJSONObject("vendor")
-    ensureBlob(vendor.getString("sha256"), vendor.getLong("bytes"), "$CDN/v1/vendor/${vendor.getString("sha256")}", 120000)
+    blobs.add(vendor to "$CDN/v1/vendor/${vendor.getString("sha256")}")
     val app = release.getJSONObject("app")
-    ensureBlob(app.getString("sha256"), app.getLong("bytes"), "$CDN/v1/app/${app.getString("sha256")}", 120000)
+    blobs.add(app to "$CDN/v1/app/${app.getString("sha256")}")
     val plugins = release.getJSONArray("plugins")
     for (index in 0 until plugins.length()) {
       val plugin = plugins.getJSONObject(index)
       val sha = plugin.getString("sha256")
-      ensureBlob(sha, plugin.getLong("bytes"), "$CDN/v1/plugins/${plugin.getString("id")}/$sha", 60000)
+      blobs.add(plugin to "$CDN/v1/plugins/${plugin.getString("id")}/$sha")
     }
+    downloadBlobs(blobs)
     incoming.mkdirs()
     writeAtomic(File(incoming, "$id.json"), text.toByteArray(Charsets.UTF_8))
     clearIncoming(id)
@@ -424,17 +430,73 @@ class ReleaseStore(private val context: Context) {
     if (item.optLong("bytes") <= 0L) throw IllegalArgumentException("配套大小不对")
   }
 
-  private fun ensureBlob(sha: String, bytes: Long, url: String, readTimeoutMs: Int) {
+  private fun downloadBlobs(blobs: List<Pair<JSONObject, String>>) {
+    val cancelled = AtomicBoolean(false)
+    val connections = ConcurrentHashMap.newKeySet<HttpURLConnection>()
+    val completion = ExecutorCompletionService<Unit>(DOWNLOADS)
+    val entries = blobs.distinctBy { it.first.getString("sha256") }
+    for ((item, url) in entries) completion.submit(java.util.concurrent.Callable {
+      ensureBlob(item.getString("sha256"), item.getLong("bytes"), url, cancelled, connections)
+    })
+    var failure: Throwable? = null
+    var interrupted = false
+    var remaining = entries.size
+    // Drain every worker before releasing STAGE, so a retry cannot race its temp files.
+    while (remaining > 0) {
+      try {
+        val task = completion.take()
+        remaining--
+        task.get()
+      } catch (error: Exception) {
+        if (error is InterruptedException) interrupted = true
+        if (failure == null) failure = error.cause ?: error
+        cancelled.set(true)
+        connections.forEach { runCatching { it.disconnect() } }
+      }
+    }
+    if (interrupted) Thread.currentThread().interrupt()
+    failure?.let { throw IllegalStateException("配套下载未完成，请重试", it) }
+  }
+
+  private fun ensureBlob(sha: String, bytes: Long, url: String, cancelled: AtomicBoolean, connections: MutableSet<HttpURLConnection>) {
+    fun check() { if (cancelled.get()) throw java.io.IOException("配套下载已取消") }
+    check()
     val file = blob(sha)
     if (file.isFile && file.length() == bytes) {
       Log.i(TAG, "blob already here ${sha.take(12)}")
       return
     }
-    val data = httpGetBytes(url, readTimeoutMs)
-    if (data.size.toLong() != bytes) throw IllegalStateException("配套大小不对 ${sha.take(12)}")
     blobs.mkdirs()
-    writeAtomic(file, data)
-    Log.i(TAG, "downloaded blob ${sha.take(12)} bytes=${data.size}")
+    val temporary = File(blobs, "$sha.tmp")
+    val connection = URL(url).openConnection() as HttpURLConnection
+    connection.connectTimeout = 10000
+    connection.readTimeout = 120000
+    connections.add(connection)
+    try {
+      check()
+      if (connection.responseCode !in 200..299) throw IllegalStateException("配套下载失败 ${connection.responseCode}")
+      var total = 0L
+      connection.inputStream.use { input -> temporary.outputStream().use { output ->
+        val buffer = ByteArray(32768)
+        while (true) {
+          check()
+          val count = input.read(buffer)
+          if (count < 0) break
+          total += count
+          if (total > bytes) throw IllegalStateException("配套超过声明大小")
+          output.write(buffer, 0, count)
+        }
+      } }
+      check()
+      if (total != bytes) throw IllegalStateException("配套大小不对 ${sha.take(12)}")
+      if (file.exists() && !file.delete()) throw IllegalStateException("无法替换配套包")
+      if (!temporary.renameTo(file)) throw IllegalStateException("无法保存配套包")
+    } finally {
+      connections.remove(connection)
+      connection.disconnect()
+      temporary.delete()
+    }
+    Log.i(TAG, "downloaded blob ${sha.take(12)} bytes=$bytes")
   }
 
   private fun blob(sha: String): File = File(blobs, sha)
@@ -502,22 +564,6 @@ class ReleaseStore(private val context: Context) {
     }
   }
 
-  private fun httpGetBytes(url: String, readTimeoutMs: Int): ByteArray {
-    val connection = URL(url).openConnection() as HttpURLConnection
-    connection.connectTimeout = 10000
-    connection.readTimeout = readTimeoutMs
-    connection.requestMethod = "GET"
-    try {
-      val code = connection.responseCode
-      val stream = if (code in 200..299) connection.inputStream else connection.errorStream
-      val body = stream.use { it.readBytes() }
-      if (code !in 200..299) throw IllegalStateException("配套下载失败 $code ${String(body, Charsets.UTF_8).take(180)}")
-      return body
-    } finally {
-      connection.disconnect()
-    }
-  }
-
   private companion object {
     const val TAG = "ReleaseStore"
     const val FORMAT = 3
@@ -526,5 +572,6 @@ class ReleaseStore(private val context: Context) {
     val HEX = Regex("[a-f0-9]{64}")
     val STATE = Any()
     val STAGE = ReentrantLock()
+    val DOWNLOADS = Executors.newFixedThreadPool(2)
   }
 }

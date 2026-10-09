@@ -28,6 +28,7 @@ class ApplicationStore(private val context: Context) {
     val resources = Executors.newFixedThreadPool(6)
     val preparing = ConcurrentHashMap<String, Preparation>()
     val prepared = LinkedHashMap<String, PreparedApplication>(32, 0.75f, true)
+    val assetAliases = LinkedHashMap<String, JSONObject>(32, 0.75f, true)
     val watchdogs = Executors.newSingleThreadScheduledExecutor()
   }
 
@@ -61,6 +62,7 @@ class ApplicationStore(private val context: Context) {
   /** Preparation and execution share the exact same immutable paths. */
   fun prepare(manifest: JSONObject): PreparedApplication {
     val key = root.absolutePath + "/" + manifest.getString("appId") + ":" + manifest.getString("releaseId")
+    synchronized(prepared) { prepared[key]?.let { return it } }
     val job = Preparation()
     job.task = FutureTask<PreparedApplication> {
       val started = System.nanoTime()
@@ -168,9 +170,7 @@ class ApplicationStore(private val context: Context) {
     if (complete(file, bytes)) return file
     val temporary = File(directory, "$sha.tmp")
     try {
-      val aliases = try {
-        context.assets.open("applications/$appId/asset-aliases.json").bufferedReader().use { JSONObject(it.readText()) }
-      } catch (_: java.io.FileNotFoundException) { JSONObject() }
+      val aliases = aliases(appId)
       val sharedAsset = aliases.optString(sha)
       val seedPath = if (sharedAsset.matches(Regex("^jolly/[a-z0-9_]+\\.mp4$"))) sharedAsset else "applications/$appId/$sha.bundle"
       context.assets.open(seedPath).use { input -> temporary.outputStream().use { input.copyTo(it) } }
@@ -216,6 +216,16 @@ class ApplicationStore(private val context: Context) {
     require(Regex("^[a-z][a-z0-9-]{0,63}$").matches(appId)) { "invalid application identity" }
     return try { context.assets.open("applications/$appId/manifest.json").bufferedReader().use { JSONObject(it.readText()) } }
     catch (_: java.io.FileNotFoundException) { null }
+  }
+
+  private fun aliases(appId: String): JSONObject = synchronized(assetAliases) {
+    assetAliases[appId]?.let { return it }
+    val value = try {
+      context.assets.open("applications/$appId/asset-aliases.json").bufferedReader().use { JSONObject(it.readText()) }
+    } catch (_: java.io.FileNotFoundException) { JSONObject() }
+    assetAliases[appId] = value
+    while (assetAliases.size > 32) assetAliases.remove(assetAliases.keys.first())
+    value
   }
 
   private fun complete(file: File, bytes: Long): Boolean = file.isFile && file.length() == bytes

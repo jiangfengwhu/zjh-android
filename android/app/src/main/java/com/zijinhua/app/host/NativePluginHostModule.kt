@@ -19,7 +19,17 @@ class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePlug
     super.invalidate()
   }
   override fun call(pluginId: String, method: String, payload: String, promise: Promise) {
-    calls.execute {
+    if (pluginId == "shell" && method == "prepareApplication") {
+      PluginCenter.prepareApplicationAsync(payload, { promise.resolve(it) }, { promise.reject("PLUGIN_ERROR", it.message, it) })
+      return
+    }
+    val executor = when {
+      pluginId == "shell" && method in setOf("completeCancel", "cancelApplicationPreparation") -> control
+      pluginId == "shell" && method == "complete" -> ai
+      pluginId == "shell" && method in setOf("loadApp", "loadApplication") -> evaluation
+      else -> calls
+    }
+    executor.execute {
       try {
         val result = if (pluginId == "shell" && method == "complete") {
           val input = JSONObject(payload)
@@ -47,6 +57,9 @@ class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePlug
   companion object {
     const val NAME = "NativePluginHost"
     private const val TAG = "NativePluginHost"
-    private val calls = Executors.newCachedThreadPool()
+    private val calls = Executors.newFixedThreadPool(4)
+    private val ai = Executors.newFixedThreadPool(4)
+    private val evaluation = Executors.newSingleThreadExecutor()
+    private val control = Executors.newSingleThreadExecutor()
   }
 }

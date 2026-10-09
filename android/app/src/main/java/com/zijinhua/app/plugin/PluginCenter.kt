@@ -105,6 +105,16 @@ object PluginCenter {
     return JSONObject().put("ok", true).put("written", 0).toString()
   }
 
+  fun prepareApplicationAsync(payload: String, complete: (String) -> Unit, fail: (Exception) -> Unit) {
+    downloads.execute {
+      try {
+        val context = appContext ?: throw IllegalStateException("plugin center not installed")
+        ApplicationStore(context).prepare(JSONObject(payload))
+        complete(JSONObject().put("ok", true).toString())
+      } catch (error: Exception) { fail(error) }
+    }
+  }
+
   private fun registerBuiltins(context: Context) {
     registry.register("shell", "ping", PluginHandler { _ ->
       """{"ok":true,"host":"1.0"}"""
@@ -148,15 +158,7 @@ object PluginCenter {
     registry.register("shell", "prepareApplication", PluginHandler { payload ->
       val context = appContext ?: throw IllegalStateException("plugin center not installed")
       val manifest = JSONObject(payload)
-      val task = downloads.submit<Boolean> {
-        ApplicationStore(context).prepare(manifest)
-        true
-      }
-      try { task.get(95, TimeUnit.SECONDS) } catch (error: Exception) {
-        ApplicationStore(context).cancelPreparation(manifest.getString("appId"), manifest.getString("releaseId"))
-        task.cancel(true)
-        throw error
-      }
+      ApplicationStore(context).prepare(manifest)
       JSONObject().put("ok", true).toString()
     })
     registry.register("shell", "cancelApplicationPreparation", PluginHandler { payload ->
