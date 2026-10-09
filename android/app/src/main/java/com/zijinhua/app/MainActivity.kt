@@ -134,11 +134,12 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     fun dp(value: Int) = (value * density).toInt()
     startupBranding = FrameLayout(this).apply {
       setBackgroundColor(getColor(R.color.splash_background))
+      // Match Theme.SplashScreen: 288dp includes padding around the 192dp safe circle.
       addView(ImageView(this@MainActivity).apply {
         setImageResource(R.drawable.ic_splash_logo)
         contentDescription = getString(R.string.app_name)
         scaleType = ImageView.ScaleType.FIT_CENTER
-      }, FrameLayout.LayoutParams(dp(192), dp(192), Gravity.CENTER))
+      }, FrameLayout.LayoutParams(dp(288), dp(288), Gravity.CENTER))
       addView(TextView(this@MainActivity).apply {
         text = getString(R.string.app_slogan)
         textSize = 15f
