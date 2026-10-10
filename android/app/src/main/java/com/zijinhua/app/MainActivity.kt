@@ -228,6 +228,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
       reactHost.onHostDestroy(this)
     }
     surface = null
+    com.zijinhua.app.shell.ShellDocuments.stopActivity(this)
     ShellCapabilities.detach(this)
     super.onDestroy()
   }

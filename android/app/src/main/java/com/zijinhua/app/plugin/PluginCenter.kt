@@ -13,7 +13,6 @@ import com.zijinhua.app.bundle.ApplicationStore
 import com.zijinhua.app.shell.ShellAi
 import com.zijinhua.app.shell.ShellBluetooth
 import com.zijinhua.app.shell.ShellCapabilities
-import com.zijinhua.app.shell.ShellComms
 import com.zijinhua.app.shell.ShellHealth
 import com.zijinhua.app.shell.ShellNfc
 import com.zijinhua.app.shell.ShellPhone
@@ -187,7 +186,6 @@ object PluginCenter {
     ShellHealth.register(registry)
     ShellBluetooth.register(registry)
     ShellNfc.register(registry)
-    ShellComms.register(registry)
     ShellAi.register(registry, context)
     Log.i(TAG, "builtins registered for ${context.packageName}")
   }

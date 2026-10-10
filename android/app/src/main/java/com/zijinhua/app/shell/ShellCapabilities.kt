@@ -103,13 +103,12 @@ object ShellCapabilities {
       "capabilities", "notify", "schedule", "cancelSchedule", "notificationStatus", "notificationSettings", "notificationEvents", "cancelAllSchedules",
       "schedules", "share", "exportFile", "authenticate",
       "location", "pick", "installPackage",
-      "device", "contacts", "calendarEvents", "calendarInsert", "openUrl",
+      "device", "calendarEvents", "calendarInsert", "openUrl",
       "motion", "torch", "keepAwake", "speak",
       "healthStatus", "healthPermissions", "requestHealth", "healthSummary",
       "bluetoothState", "bluetoothDevices", "bluetoothScan", "nfcStatus", "nfcRead",
-      "smsList", "smsSend", "callLog",
       "appearance", "systemBars", "bundleReady", "loadApp", "providers", "saveProvider", "deleteProvider", "complete", "completeCancel",
-    ).plus(ShellAppFeatures.methods).forEach { methods.put(it) }
+    ).plus((ShellAppFeatures.methods + ShellDocuments.methods + ShellWidgets.methods)).forEach { methods.put(it) }
     return JSONObject().put("ok", true).put("methods", methods)
   }
 
@@ -228,24 +227,26 @@ object ShellCapabilities {
     }
     val manager = host.getSystemService(LocationManager::class.java)
       ?: throw IllegalStateException("LocationManager unavailable")
-    val provider = if (fine) LocationManager.GPS_PROVIDER else LocationManager.NETWORK_PROVIDER
+    val provider = (if (fine) listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER) else listOf(LocationManager.NETWORK_PROVIDER))
+      .firstOrNull { runCatching { manager.isProviderEnabled(it) }.getOrDefault(false) }
+      ?: return JSONObject().put("ok", false).put("error", "unavailable")
     val latch = CountDownLatch(1)
-    val out = JSONObject()
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-      manager.getCurrentLocation(provider, null, host.mainExecutor) { location ->
-        if (location == null) out.put("ok", false).put("error", "unavailable")
-        else out.put("ok", true).put("lat", location.latitude).put("lng", location.longitude).put("accuracy", location.accuracy)
-        latch.countDown()
-      }
-    } else {
-      @Suppress("DEPRECATION")
-      manager.requestSingleUpdate(provider, { location ->
-        out.put("ok", true).put("lat", location.latitude).put("lng", location.longitude).put("accuracy", location.accuracy)
-        latch.countDown()
-      }, host.mainLooper)
+    val out = java.util.concurrent.atomic.AtomicReference<JSONObject>()
+    val signal = CancellationSignal()
+    val listener = android.location.LocationListener { location ->
+      out.set(JSONObject().put("ok", true).put("lat", location.latitude).put("lng", location.longitude).put("accuracy", location.accuracy)); latch.countDown()
     }
-    if (!latch.await(20, TimeUnit.SECONDS)) return JSONObject().put("ok", false).put("error", "timeout")
-    return out
+    try {
+      if (Build.VERSION.SDK_INT >= 30) manager.getCurrentLocation(provider, signal, host.mainExecutor) { location ->
+        if (location == null) out.set(JSONObject().put("ok", false).put("error", "unavailable")) else listener.onLocationChanged(location)
+        latch.countDown()
+      } else {
+        @Suppress("DEPRECATION")
+        manager.requestSingleUpdate(provider, listener, host.mainLooper)
+      }
+      return if (latch.await(20, TimeUnit.SECONDS)) out.get() ?: JSONObject().put("ok", false).put("error", "unavailable")
+        else JSONObject().put("ok", false).put("error", "timeout")
+    } finally { signal.cancel(); manager.removeUpdates(listener) }
   }
 
   private fun pick(input: JSONObject): JSONObject {

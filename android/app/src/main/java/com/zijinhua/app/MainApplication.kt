@@ -85,6 +85,11 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
     Log.i(TAG, "startup application-create")
   }
 
+  override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+    super.onConfigurationChanged(newConfig)
+    maintenance.execute { com.zijinhua.app.shell.ShellWidgets.refreshAll(this) }
+  }
+
   private fun prepareReact() {
     val started = SystemClock.elapsedRealtime()
     fun milestone(stage: String) = Log.i(TAG, "startup $stage elapsedMs=${SystemClock.elapsedRealtime() - started}")

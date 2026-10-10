@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="16dp" android:background="@color/widget_background">
+    <TextView android:id="@+id/widget_title" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:textColor="@color/widget_foreground" android:textSize="18sp" android:textStyle="bold" android:maxLines="2" android:ellipsize="end" />
+    <ImageView android:id="@+id/widget_image" android:layout_width="match_parent" android:layout_height="0dp"
+        android:layout_weight="1" android:scaleType="fitCenter" android:visibility="gone" android:contentDescription="小组件图片" />
+    <TextView android:id="@+id/widget_body" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:textColor="@color/widget_foreground" android:textSize="14sp" android:maxLines="5" android:ellipsize="end" />
+    <ProgressBar android:id="@+id/widget_progress" style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:visibility="gone" />
+</LinearLayout>

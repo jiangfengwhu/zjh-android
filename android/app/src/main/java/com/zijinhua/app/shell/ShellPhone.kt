@@ -14,7 +14,6 @@ import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
 import android.provider.CalendarContract
-import android.provider.ContactsContract
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.view.WindowManager
@@ -31,7 +30,6 @@ object ShellPhone {
 
   fun register(registry: PluginRegistry) {
     registry.register("shell", "device") { _ -> device().toString() }
-    registry.register("shell", "contacts") { payload -> contacts(JSONObject(payload.ifBlank { "{}" })).toString() }
     registry.register("shell", "calendarEvents") { payload -> calendarEvents(JSONObject(payload)).toString() }
     registry.register("shell", "calendarInsert") { payload -> calendarInsert(JSONObject(payload)).toString() }
     registry.register("shell", "openUrl") { payload -> openUrl(JSONObject(payload)).toString() }
@@ -63,40 +61,6 @@ object ShellPhone {
       .put("release", Build.VERSION.RELEASE)
       .put("battery", percent)
       .put("charging", charging)
-  }
-
-  private fun contacts(input: JSONObject): JSONObject {
-    val context = context()
-    if (!granted(context, android.Manifest.permission.READ_CONTACTS)) {
-      return JSONObject().put("ok", false).put("error", "permission")
-    }
-    val limit = input.optInt("limit", 40).coerceIn(1, 80)
-    val query = input.optString("query").trim()
-    val selection = if (query.isEmpty()) null else "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
-    val args = if (query.isEmpty()) null else arrayOf("%$query%")
-    val items = JSONArray()
-    context.contentResolver.query(
-      ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-      arrayOf(
-        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
-        ContactsContract.CommonDataKinds.Phone.NUMBER,
-      ),
-      selection,
-      args,
-      "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC",
-    )?.use { cursor ->
-      val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
-      val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
-      while (cursor.moveToNext() && items.length() < limit) {
-        items.put(
-          JSONObject()
-            .put("name", if (nameIndex >= 0) cursor.getString(nameIndex) ?: "" else "")
-            .put("number", if (numberIndex >= 0) cursor.getString(numberIndex) ?: "" else ""),
-        )
-      }
-    }
-    Log.i(TAG, "contacts count=${items.length()}")
-    return JSONObject().put("ok", true).put("items", items)
   }
 
   private fun calendarEvents(input: JSONObject): JSONObject {
@@ -174,8 +138,9 @@ object ShellPhone {
   private fun openUrl(input: JSONObject): JSONObject {
     val host = ShellCapabilities.hostActivity() ?: return JSONObject().put("ok", false).put("error", "activity")
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(input.getString("url")))
-    host.runOnUiThread { host.startActivity(intent) }
-    return JSONObject().put("ok", true)
+    val result = java.util.concurrent.CompletableFuture<JSONObject>()
+    host.runOnUiThread { try { host.startActivity(intent); result.complete(JSONObject().put("ok", true)) } catch (_: Exception) { result.complete(JSONObject().put("ok", false).put("error", "unavailable")) } }
+    return result.get(5, TimeUnit.SECONDS)
   }
 
   private fun granted(context: Context, permission: String): Boolean {

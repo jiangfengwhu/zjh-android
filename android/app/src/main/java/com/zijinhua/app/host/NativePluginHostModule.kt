@@ -10,6 +10,8 @@ import java.util.concurrent.ConcurrentHashMap
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.zijinhua.app.shell.ShellAi
+import com.zijinhua.app.shell.ShellDocuments
+import com.zijinhua.app.shell.ShellWidgets
 import com.zijinhua.app.shell.ShellAppFeatures
 import org.json.JSONObject
 
@@ -19,9 +21,16 @@ class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePlug
   override fun invalidate() {
     aiRequests.forEach { ShellAi.cancel(it) }
     ShellAppFeatures.stopAll()
+    ShellDocuments.stopAll()
     super.invalidate()
   }
   override fun call(pluginId: String, method: String, payload: String, promise: Promise) {
+    if (pluginId == "shell" && method in ShellDocuments.methods) {
+      ShellDocuments.call(reactApplicationContext, method, JSONObject(payload)) { promise.resolve(it.toString()) }; return
+    }
+    if (pluginId == "shell" && method in ShellWidgets.methods) {
+      calls.execute { try { promise.resolve(ShellWidgets.call(reactApplicationContext, method, JSONObject(payload)).toString()) } catch (_: Exception) { promise.resolve(JSONObject().put("ok", false).put("error", "unavailable").toString()) } }; return
+    }
     if (pluginId == "shell" && method in ShellAppFeatures.methods) {
       val invoke = Runnable {
         try {

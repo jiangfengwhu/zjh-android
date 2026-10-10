@@ -28,6 +28,7 @@ object ShellBluetooth {
 
   private fun state(): JSONObject {
     val adapter = adapter() ?: return JSONObject().put("ok", true).put("present", false).put("enabled", false)
+    if (!canConnect(ShellCapabilities.hostContext())) return JSONObject().put("ok", false).put("error", "permission").put("present", true)
     return JSONObject().put("ok", true).put("present", true).put("enabled", adapter.isEnabled)
   }
 
@@ -54,7 +55,10 @@ object ShellBluetooth {
     val seconds = input.optInt("seconds", 4).coerceIn(1, 8)
     val found = ConcurrentHashMap<String, JSONObject>()
     val names = canConnect(context)
+    val ended = CountDownLatch(1)
+    val failure = java.util.concurrent.atomic.AtomicInteger(0)
     val callback = object : ScanCallback() {
+      override fun onScanFailed(errorCode: Int) { failure.set(errorCode); ended.countDown() }
       override fun onScanResult(callbackType: Int, result: ScanResult) {
         val address = result.device.address ?: return
         if (found.size >= 40 && !found.containsKey(address)) return
@@ -66,7 +70,7 @@ object ShellBluetooth {
     }
     try {
       scanner.startScan(callback)
-      CountDownLatch(1).await(seconds.toLong(), TimeUnit.SECONDS)
+      ended.await(seconds.toLong(), TimeUnit.SECONDS)
     } catch (error: SecurityException) {
       Log.i(TAG, "bluetooth scan denied")
       return JSONObject().put("ok", false).put("error", "permission")
@@ -76,6 +80,7 @@ object ShellBluetooth {
       } catch (_: SecurityException) {
       }
     }
+    if (failure.get() != 0) return JSONObject().put("ok", false).put("error", "scan").put("nativeCode", failure.get())
     val items = JSONArray()
     found.values.forEach { items.put(it) }
     Log.i(TAG, "bluetooth scan count=${items.length()}")

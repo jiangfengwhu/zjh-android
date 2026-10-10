@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 object ShellNfc {
   private const val TAG = "ShellNfc"
+  private val reading = AtomicBoolean(false)
 
   fun register(registry: PluginRegistry) {
     registry.register("shell", "nfcStatus") { _ -> status().toString() }
@@ -41,21 +42,24 @@ object ShellNfc {
       NfcAdapter.FLAG_READER_NFC_F or
       NfcAdapter.FLAG_READER_NFC_V or
       NfcAdapter.FLAG_READER_NFC_BARCODE
-    activity.runOnUiThread {
-      adapter.enableReaderMode(activity, { tag ->
-        if (!closed.compareAndSet(false, true)) return@enableReaderMode
-        payload.set(describe(tag))
-        adapter.disableReaderMode(activity)
-        latch.countDown()
-      }, flags, null)
+    if (!reading.compareAndSet(false, true)) return JSONObject().put("ok", false).put("error", "busy")
+    try {
+      activity.runOnUiThread {
+        if (!closed.get()) try {
+          adapter.enableReaderMode(activity, { tag ->
+            if (!closed.compareAndSet(false, true)) return@enableReaderMode
+            try { payload.set(describe(tag)) } catch (_: Exception) { payload.set(JSONObject().put("ok", false).put("error", "unavailable")) }
+            finally { activity.runOnUiThread { runCatching { adapter.disableReaderMode(activity) } }; latch.countDown() }
+          }, flags, null)
+        } catch (_: Exception) { payload.set(JSONObject().put("ok", false).put("error", "unavailable")); closed.set(true); latch.countDown() }
+      }
+      if (!latch.await(seconds.toLong(), TimeUnit.SECONDS)) return JSONObject().put("ok", false).put("error", "timeout")
+      return payload.get() ?: JSONObject().put("ok", false).put("error", "empty")
+    } finally {
+      closed.set(true)
+      // Release ownership on the same looper as reader-mode changes, before the next read starts.
+      activity.runOnUiThread { try { adapter.disableReaderMode(activity) } finally { reading.set(false) } }
     }
-    val got = latch.await(seconds.toLong(), TimeUnit.SECONDS)
-    if (closed.compareAndSet(false, true)) {
-      activity.runOnUiThread { adapter.disableReaderMode(activity) }
-    }
-    if (!got) return JSONObject().put("ok", false).put("error", "timeout")
-    Log.i(TAG, "nfc tag read")
-    return payload.get() ?: JSONObject().put("ok", false).put("error", "empty")
   }
 
   private fun describe(tag: Tag): JSONObject {
@@ -80,7 +84,7 @@ object ShellNfc {
       if (bytes.isEmpty()) return ""
       val languageLength = bytes[0].toInt() and 0x3F
       val start = (1 + languageLength).coerceAtMost(bytes.size)
-      return String(bytes, start, bytes.size - start, Charsets.UTF_8)
+      return String(bytes, start, bytes.size - start, if (bytes[0].toInt() and 0x80 != 0) Charsets.UTF_16 else Charsets.UTF_8)
     }
     if (record.tnf == NdefRecord.TNF_WELL_KNOWN && record.type.contentEquals(NdefRecord.RTD_URI)) {
       return record.toUri().toString()

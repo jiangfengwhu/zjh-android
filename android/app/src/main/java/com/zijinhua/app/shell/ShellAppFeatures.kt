@@ -37,8 +37,8 @@ import java.util.Locale
 
 /** Interactive work runs on the main looper; media copying stays on the bridge IO pool. */
 object ShellAppFeatures {
-  val methods = setOf("shortcutStatus", "shortcutAdd", "shortcutRemove", "saveToGallery", "calendarCompose",
-    "speechStatus", "speechSpeak", "speechStop", "speechRecognize", "speechCancel",
+  val methods = setOf("shortcutStatus", "shortcutAdd", "shortcutRemove", "shortcutList", "appKeepAwake", "saveToGallery", "calendarCompose",
+    "speechStatus", "speechSpeak", "speechStop", "speechRecognize", "speechFinish", "speechCancelAll", "speechCancel",
     "sensorStatus", "sensorStart", "sensorStop", "biometricStatus", "biometricAuthenticate", "biometricCancel", "appNativeStop", "removeApplicationShortcuts")
   private val main = Handler(Looper.getMainLooper())
   private data class Task(val appId: String, val id: String, val reply: (JSONObject) -> Unit, var timeout: Runnable? = null, var replied: Boolean = false)
@@ -52,6 +52,8 @@ object ShellAppFeatures {
   private var recognizing: Task? = null
   private var biometric: Task? = null
   private var biometricCancel: CancellationSignal? = null
+  private val awake = mutableSetOf<String>()
+  private fun updateAwake() { ShellCapabilities.hostActivity()?.window?.let { window -> if (awake.isEmpty()) window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) } }
   private val sensors = mutableMapOf<String, Pair<String, SensorEventListener>>()
   private fun context() = applicationContext ?: ShellCapabilities.hostContext()
   private fun resolve(task: Task, value: JSONObject) { if (!task.replied) { task.replied = true; task.reply(value) } }
@@ -73,6 +75,8 @@ object ShellAppFeatures {
         val appId = app(input)
         when (method) {
           "shortcutStatus" -> reply(result().put("supported", context().getSystemService(ShortcutManager::class.java)?.isRequestPinShortcutSupported == true))
+          "shortcutList" -> reply(result().put("items", JSONArray(context().getSystemService(ShortcutManager::class.java)?.pinnedShortcuts?.filter { it.id.startsWith("$appId:") }?.map { JSONObject().put("id", it.id.substringAfter(':')).put("enabled", it.isEnabled).put("label", it.shortLabel) } ?: emptyList<JSONObject>())))
+          "appKeepAwake" -> { if (input.optBoolean("on")) awake.add(appId) else awake.remove(appId); updateAwake(); reply(result()) }
           "shortcutAdd" -> reply(shortcut(input, appId, requireNotNull(shortcutIcon)))
           "shortcutRemove" -> { removeShortcut(appId, input.getString("id")); reply(result()) }
           "removeApplicationShortcuts" -> { removeShortcuts(appId); reply(result()) }
@@ -84,6 +88,8 @@ object ShellAppFeatures {
           "speechSpeak" -> speak(input, appId, reply)
           "speechStop" -> { if (!input.has("requestId") || speaking?.id == id(input)) stopSpeech(appId); reply(result()) }
           "speechRecognize" -> recognize(input, appId, emit, reply)
+          "speechFinish" -> { if (recognizing?.appId == appId) recognizer?.stopListening(); reply(result()) }
+          "speechCancelAll" -> { if (recognizing?.appId == appId) stopRecognition(); reply(result()) }
           "speechCancel" -> { if (recognizing?.appId == appId && recognizing?.id == id(input)) stopRecognition(); reply(result()) }
           "sensorStatus" -> { val manager = context().getSystemService(SensorManager::class.java); reply(result().put("items", JSONArray(sensorTypes.keys.filter { manager?.getDefaultSensor(sensorTypes.getValue(it)) != null }))) }
           "sensorStart" -> reply(startSensor(input, appId, emit))
@@ -341,12 +347,13 @@ object ShellAppFeatures {
     biometric = null; biometricCancel?.cancel(); biometricCancel = null; complete(task, result(error))
   }
   private fun stopApp(appId: String, includeBiometric: Boolean = true) {
+    awake.remove(appId); updateAwake()
     stopSpeech(appId)
     if (recognizing?.appId == appId) stopRecognition()
     if (includeBiometric && biometric?.appId == appId) stopBiometric()
     sensors.filterValues { it.first == appId }.keys.toList().forEach { stopSensor(it) }
   }
   fun stopAll(includeBiometric: Boolean = true) {
-    main.post { stopSpeech(); stopRecognition(); if (includeBiometric) stopBiometric(); sensors.keys.toList().forEach { stopSensor(it) }; speechGeneration++; tts?.shutdown(); tts = null; ttsReady = false }
+    main.post { awake.clear(); updateAwake(); stopSpeech(); stopRecognition(); if (includeBiometric) stopBiometric(); sensors.keys.toList().forEach { stopSensor(it) }; speechGeneration++; tts?.shutdown(); tts = null; ttsReady = false }
   }
 }
