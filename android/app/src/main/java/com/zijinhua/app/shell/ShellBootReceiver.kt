@@ -8,13 +8,16 @@ import android.util.Log
 class ShellBootReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent?) {
     val action = intent?.action ?: return
-    if (action != Intent.ACTION_BOOT_COMPLETED && action != Intent.ACTION_MY_PACKAGE_REPLACED) return
-    try {
-      ShellAlarms.reschedule(context.applicationContext)
-      Log.i(TAG, "reschedule after $action")
-    } catch (error: Exception) {
-      Log.i(TAG, "boot reschedule skipped ${error.message}")
-    }
+    if (action !in listOf(Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED, "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED")) return
+    val pending = goAsync()
+    Thread {
+      try {
+        ShellAlarms.reschedule(context.applicationContext)
+        Log.i(TAG, "reschedule after $action")
+      } catch (error: Exception) {
+        Log.i(TAG, "boot reschedule skipped ${error.message}")
+      } finally { pending.finish() }
+    }.start()
   }
 
   private companion object {

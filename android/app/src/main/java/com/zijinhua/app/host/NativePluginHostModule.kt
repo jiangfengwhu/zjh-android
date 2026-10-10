@@ -10,15 +10,40 @@ import java.util.concurrent.ConcurrentHashMap
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.zijinhua.app.shell.ShellAi
+import com.zijinhua.app.shell.ShellAppFeatures
 import org.json.JSONObject
 
 class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePluginHostSpec(reactContext) {
+  init { ShellAppFeatures.attachContext(reactContext.applicationContext) }
   private val aiRequests = ConcurrentHashMap.newKeySet<String>()
   override fun invalidate() {
     aiRequests.forEach { ShellAi.cancel(it) }
+    ShellAppFeatures.stopAll()
     super.invalidate()
   }
   override fun call(pluginId: String, method: String, payload: String, promise: Promise) {
+    if (pluginId == "shell" && method in ShellAppFeatures.methods) {
+      val invoke = Runnable {
+        try {
+          ShellAppFeatures.call(method, JSONObject(payload), { value ->
+            if (reactApplicationContext.hasActiveReactInstance()) {
+              val event = Arguments.createMap().apply {
+                putString("appId", value.optString("appId")); putString("requestId", value.optString("requestId"))
+                putString("kind", value.optString("kind"))
+                if (value.has("text")) putString("text", value.getString("text"))
+                if (value.has("sensor")) {
+                  putString("sensor", value.getString("sensor")); putDouble("timestampMs", value.getDouble("timestampMs")); putInt("accuracy", value.getInt("accuracy"))
+                  putArray("values", Arguments.createArray().apply { val values = value.getJSONArray("values"); for (index in 0 until values.length()) pushDouble(values.getDouble(index)) })
+                }
+              }
+              reactApplicationContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java).emit("zijinhua.app.native", event)
+            }
+          }, { promise.resolve(it.toString()) })
+        } catch (error: Exception) { promise.reject("PLUGIN_ERROR", error.message, error) }
+      }
+      if (method in setOf("saveToGallery", "shortcutAdd")) calls.execute(invoke) else invoke.run()
+      return
+    }
     if (pluginId == "shell" && method == "prepareApplication") {
       PluginCenter.prepareApplicationAsync(payload, { promise.resolve(it) }, { promise.reject("PLUGIN_ERROR", it.message, it) })
       return

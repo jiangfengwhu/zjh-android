@@ -105,6 +105,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     val splash = installSplashScreen()
     supportFragmentManager.fragmentFactory = RNScreensFragmentFactory()
     super.onCreate(savedInstanceState)
+    com.zijinhua.app.shell.ShellAlarms.capture(applicationContext, intent)
     splash.setKeepOnScreenCondition { !::root.isInitialized }
     splash.setOnExitAnimationListener { screen ->
       screen.remove()
@@ -189,6 +190,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
+    com.zijinhua.app.shell.ShellAlarms.capture(applicationContext, intent)
     setIntent(intent)
     if (surface != null) reactHost.onNewIntent(intent)
   }
@@ -208,6 +210,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   }
 
   override fun onPause() {
+    com.zijinhua.app.shell.ShellAppFeatures.stopAll(includeBiometric = false)
     if (surface != null) {
       reactHost.onHostPause(this)
     }

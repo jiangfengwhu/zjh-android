@@ -7,12 +7,16 @@ import android.util.Log
 
 class ShellAlarmReceiver : BroadcastReceiver() {
   override fun onReceive(context: Context, intent: Intent?) {
-    if (intent?.action != ShellAlarms.ACTION_FIRE) return
-    try {
-      ShellAlarms.fire(context.applicationContext, intent)
-    } catch (error: Exception) {
-      Log.i(TAG, "alarm skipped ${error.message}")
-    }
+    if (intent == null || intent.action !in listOf(ShellAlarms.ACTION_FIRE, ShellAlarms.ACTION_BUTTON)) return
+    val pending = goAsync()
+    Thread {
+      try {
+        if (intent.action == ShellAlarms.ACTION_BUTTON) ShellAlarms.button(context.applicationContext, intent)
+        else ShellAlarms.fire(context.applicationContext, intent)
+      } catch (error: Exception) {
+        Log.i(TAG, "alarm skipped ${error.message}")
+      } finally { pending.finish() }
+    }.start()
   }
 
   private companion object {

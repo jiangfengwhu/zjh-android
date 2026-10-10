@@ -68,6 +68,20 @@ object ShellCapabilities {
       JSONObject().put("ok", true).toString()
     }
     registry.register("shell", "capabilities") { _ -> capabilities().toString() }
+    registry.register("shell", "cancelAllSchedules") { payload -> ShellAlarms.cancelAll(appContext(), JSONObject(payload).getString("appId")).toString() }
+    registry.register("shell", "notificationStatus") { payload ->
+      val input = JSONObject(payload)
+      ShellAlarms.status(appContext(), input.getString("appId"), input.optString("appName")).toString()
+    }
+    registry.register("shell", "notificationSettings") { payload ->
+      val input = JSONObject(payload)
+      ShellAlarms.settings(appContext(), input.optBoolean("exact"), input.getString("appId"), input.optString("appName"))
+      JSONObject().put("ok", true).toString()
+    }
+    registry.register("shell", "notificationEvents") { payload ->
+      val input = JSONObject(payload)
+      ShellAlarms.notificationEvents(appContext(), input.getString("appId"), input.optJSONArray("ack")).toString()
+    }
     registry.register("shell", "notify") { payload -> notify(JSONObject(payload)).toString() }
     registry.register("shell", "schedule") { payload -> schedule(JSONObject(payload)).toString() }
     registry.register("shell", "cancelSchedule") { payload -> cancelSchedule(JSONObject(payload)).toString() }
@@ -86,7 +100,7 @@ object ShellCapabilities {
   private fun capabilities(): JSONObject {
     val methods = JSONArray()
     listOf(
-      "capabilities", "notify", "schedule", "cancelSchedule",
+      "capabilities", "notify", "schedule", "cancelSchedule", "notificationStatus", "notificationSettings", "notificationEvents", "cancelAllSchedules",
       "schedules", "share", "exportFile", "authenticate",
       "location", "pick", "installPackage",
       "device", "contacts", "calendarEvents", "calendarInsert", "openUrl",
@@ -95,14 +109,18 @@ object ShellCapabilities {
       "bluetoothState", "bluetoothDevices", "bluetoothScan", "nfcStatus", "nfcRead",
       "smsList", "smsSend", "callLog",
       "appearance", "systemBars", "bundleReady", "loadApp", "providers", "saveProvider", "deleteProvider", "complete", "completeCancel",
-    ).forEach { methods.put(it) }
+    ).plus(ShellAppFeatures.methods).forEach { methods.put(it) }
     return JSONObject().put("ok", true).put("methods", methods)
   }
 
   private fun notify(input: JSONObject): JSONObject {
     val context = appContext()
     val id = ShellAlarms.requireId(input.getString("id"))
-    ShellAlarms.show(context, id, input.optString("title"), input.optString("body"))
+    val options = input.optJSONObject("options") ?: JSONObject()
+    val state = ShellAlarms.status(context, id.substringBefore(":").takeIf { id.contains(":") }, options.optString("appName"))
+    if (!state.getBoolean("enabled")) return JSONObject().put("ok", false)
+      .put("error", if (!state.getBoolean("granted")) "permission" else "channel-disabled")
+    ShellAlarms.show(context, id, input.optString("title"), input.optString("body"), input.optJSONObject("options") ?: JSONObject())
     return JSONObject().put("ok", true).put("id", id)
   }
 
@@ -113,6 +131,7 @@ object ShellCapabilities {
       input.optString("title"),
       input.optString("body"),
       input.getLong("atMs"),
+      input.optJSONObject("options") ?: JSONObject(),
     )
   }
 

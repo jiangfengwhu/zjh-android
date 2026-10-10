@@ -57,9 +57,11 @@ UI 与纯 JS 的 SDK API 变化走 dynamic 发布，不因 SDK 大版本变化�
 
 宿主请求 `/v1/updates?apkVersionCode=<本机版本>`，同时检查 APK 与动态清单。新版 APK 由用户点击后在应用内下载、确认文件长度，再调用 installPackage 打开系统安装界面；不跳浏览器、不静默安装，覆盖安装保留数据。
 
+本地通知由 ShellAlarms 使用 AlarmManager 与 NotificationManager 实现，不引入通知第三方运行时。通知点击沿用 MainActivity 和宿主深链启动流程，不自行启动 ReactHost；事件先持久化，应用订阅后处理并确认。原生操作按钮可直接延后或取消提醒，日历重复规则在重启、系统时间与时区变化后重新计算；待触发提醒和事件按应用隔离，卸载时清理。作品通知按 appId 使用独立系统渠道，保留用户的声音、振动与开关设置；渠道名称来自宿主应用元数据，后台旧提醒不覆盖更新后的名称。状态查询同时检查宿主授权和应用渠道，设置入口定位对应渠道。公共接口与限制只维护在 SDK README。
+
 RN 由 AppCompatActivity 的 FrameLayout 直接承载 ReactSurface。宿主根布局完成且导航就绪后调用 bundleReady，确认包启动健康并释放原生启动图；这不代表首页数据加载完成或屏幕已经绘制。随后延迟 1.5 秒，在后台注册 WorkManager 更新任务、恢复提醒和执行常规旧包清理。后台任务可通过 Configuration.Provider 按需初始化 WorkManager。
 
-Release 冷启动由 Application 启动 ShellStartup 后台任务：执行 prepareBoot，恢复 APK 内置包、处理失败回退、激活已暂存更新并准备固定 vendor 路径，再注册内置桥接和加载当前版本的 DEX 插件。任务完成后才在主线程启动 ReactHost 并创建 ReactSurface，避免提前捕获旧 vendor 路径或未注册的原生视图。首次安装或 APK 升级仍会复制内置包并计算缓存标识，客户端不再计算或比对下载文件的 SHA-256，激活暂存更新只检查文件存在且非空；常规回收统一在 bundleReady 后延迟执行。重载后的 bundleReady 也触发回收，服务注册与提醒恢复每进程只执行一次。
+Release 首次界面请求 whenReactReady 时，Application 启动 ShellStartup 后台任务（每进程一次）；通知接收器和 WorkManager 单独唤醒进程时不启动 RN：执行 prepareBoot，恢复 APK 内置包、处理失败回退、激活已暂存更新并准备固定 vendor 路径，再注册内置桥接和加载当前版本的 DEX 插件。任务完成后才在主线程启动 ReactHost 并创建 ReactSurface，避免提前捕获旧 vendor 路径或未注册的原生视图。首次安装或 APK 升级仍会复制内置包并计算缓存标识，客户端不再计算或比对下载文件的 SHA-256，激活暂存更新只检查文件存在且非空；常规回收统一在 bundleReady 后延迟执行。重载后的 bundleReady 也触发回收，服务注册与提醒恢复每进程只执行一次。
 
 准备失败或 app 包加载失败时退出启动图并显示原生恢复页；启动 30 秒仍未收到 bundleReady 时也显示恢复页，可重试或返回。准备失败重试重新执行准备任务，已有 RN 容器时重试重载 ReactHost；失败展示不会清除 boot.pending，成功仍由 bundleReady 确认。syncPlugins 保留兼容入口，当前版本已经在启动时注册，不重复加载同一份 DEX；显式重载或激活新版本才重新注册。
 
@@ -72,6 +74,8 @@ Release 冷启动由 Application 启动 ShellStartup 后台任务：执行 prepa
 APK 不绑定 SDK 大版本，宿主动态更新按原生运行时检查兼容。RN/Hermes ABI 或原生行为破坏旧应用兼容时，SDK 大版本必须同步递增；发布器阻止同大版本的 ABI 变化。APK 保留底层运行时和 vendor 配对校验；手机客户端下载文件按状态及长度确认完整，哈希字段用于缓存与版本定位。维护者的 prepare:apk 等构建发布工具仍校验产物哈希。
 
 分享使用 zijinhua.297782.xyz 的 HTTPS /posts/、/applications/ 链接，安装后由 Android App Links 打开。自定义 zijinhua://posts/<id>、zijinhua://applications/<id> 供网页按钮兜底。服务端 /.well-known/assetlinks.json 中的 SHA-256 指纹须匹配分发签名证书；更换签名时同步更新。验证使用 adb shell pm verify-app-links --re-verify com.zijinhua.app 与 adb shell pm get-app-links com.zijinhua.app，冷启动和 onNewIntent 均交给宿主路由处理。
+
+应用系统交互由 ShellAppFeatures 实现，SDK 负责绑定应用身份、文件作用域和可见状态。语音、身份验证与传感器通过已有桥接异步返回，不等待占用桥接工作线程；图标解码与相册复制在后台执行。作品隐藏或宿主切后台时停止语音与传感器，系统身份验证可完成锁屏凭据流程。桌面入口按应用隔离，卸载作品时禁用；日历使用系统编辑页，安卓10+相册写入使用 MediaStore，旧安卓使用系统文件保存，不为这两项申请危险权限。公开接口与参数只维护在 SDK README。
 
 ## 原生依赖补丁
 

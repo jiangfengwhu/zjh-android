@@ -26,12 +26,16 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
     get() = Configuration.Builder().build()
 
   private val maintenanceScheduled = AtomicBoolean(false)
+  private val preparationStarted = AtomicBoolean(false)
   @Volatile private var reactReady = CompletableFuture<Unit>()
   private var releasePrepared = false
   private val mainHandler = Handler(Looper.getMainLooper())
   private val maintenance by lazy { Executors.newSingleThreadExecutor { task -> Thread(task, "ShellMaintenance") } }
 
   fun whenReactReady(callback: (Throwable?) -> Unit) {
+    // Receivers and WorkManager can start the process without opening a screen.
+    // Only a UI request needs the existing bundle/plugin/RN preparation chain.
+    if (preparationStarted.compareAndSet(false, true)) prepareReact()
     reactReady.whenComplete { _, error -> mainHandler.post { callback(error) } }
   }
 
@@ -79,7 +83,6 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
   override fun onCreate() {
     super.onCreate()
     Log.i(TAG, "startup application-create")
-    prepareReact()
   }
 
   private fun prepareReact() {

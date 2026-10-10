@@ -45,6 +45,9 @@
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
 
     <queries>
+      <intent><action android:name="android.speech.RecognitionService" /></intent>
+      <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+      <intent><action android:name="android.intent.action.INSERT" /><data android:mimeType="vnd.android.cursor.dir/event" /></intent>
       <package android:name="com.google.android.apps.healthdata" />
     </queries>
 
@@ -125,6 +128,9 @@
         <intent-filter>
           <action android:name="android.intent.action.BOOT_COMPLETED" />
           <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+          <action android:name="android.intent.action.TIME_SET" />
+          <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+          <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
         </intent-filter>
       </receiver>
       <service
