@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep the wide wordmark inside the system splash's 192dp safe circle. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_splash_logo"
+    android:insetLeft="16.67%"
+    android:insetTop="16.67%"
+    android:insetRight="16.67%"
+    android:insetBottom="16.67%" />
