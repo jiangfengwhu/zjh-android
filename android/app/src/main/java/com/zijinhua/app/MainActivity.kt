@@ -203,6 +203,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
   override fun onResume() {
     super.onResume()
+    com.zijinhua.app.shell.ShellFileTransfers.onResume(this)
+    com.zijinhua.app.shell.ShellHealth.onResume(this)
     applySystemBars()
     if (surface != null) {
       reactHost.onHostResume(this, this)
@@ -211,6 +213,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
   override fun onPause() {
     com.zijinhua.app.shell.ShellAppFeatures.stopAll(includeBiometric = false)
+    com.zijinhua.app.shell.ShellOperations.pauseInteractive()
     if (surface != null) {
       reactHost.onHostPause(this)
     }
@@ -229,6 +232,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     }
     surface = null
     com.zijinhua.app.shell.ShellDocuments.stopActivity(this)
+    com.zijinhua.app.shell.ShellOperations.stopActivity(this)
     ShellCapabilities.detach(this)
     super.onDestroy()
   }

@@ -24,9 +24,6 @@
 -keep class com.zijinhua.app.bundle.ReleaseCheckWorker { *; }
 
 # ML Kit discovers these implementations from manifest metadata via reflection.
-# These constructors must remain in android.print to retain package access after R8.
--keep class android.print.ZijinhuaLayoutCallback { *; }
--keep class android.print.ZijinhuaWriteCallback { *; }
 # R8 full mode must retain the public no-argument constructors too.
 -keep class com.google.mlkit.** implements com.google.firebase.components.ComponentRegistrar {
     public <init>();

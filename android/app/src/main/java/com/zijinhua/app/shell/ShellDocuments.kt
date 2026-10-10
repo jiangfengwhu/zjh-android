@@ -5,20 +5,15 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import android.graphics.BitmapFactory
 import android.media.ExifInterface
-import android.net.Uri
 import android.os.CancellationSignal
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
-import android.print.PageRange
 import android.print.PrintAttributes
+import android.print.PageRange
 import android.print.PrintDocumentAdapter
 import android.print.PrintDocumentInfo
 import android.print.PrintManager
-import android.print.ZijinhuaLayoutCallback
-import android.print.ZijinhuaWriteCallback
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import com.google.mlkit.common.MlKit
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -26,21 +21,18 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 
-/** OCR is offline. PDF renderers are short-lived, isolated from application WebViews. */
+/** Offline OCR and printing of existing PDF files. */
 object ShellDocuments {
-  val methods = setOf("documentRecognize", "documentPdf", "documentPrint", "documentCancel", "documentStopApp")
+  val methods = setOf("documentRecognize", "documentPrint", "documentCancel", "documentStopApp")
   private val main = Handler(Looper.getMainLooper())
   private val io = Executors.newFixedThreadPool(2)
   private val tasks = mutableMapOf<String, () -> Unit>() // main looper only
-  private var pdfBusy = false
   private val owners = mutableMapOf<String, android.app.Activity>()
   fun stopAll() { main.post { tasks.values.toList().forEach { it() } } }
   fun stopActivity(activity: android.app.Activity) { main.post {
@@ -64,7 +56,6 @@ object ShellDocuments {
         if (tasks.size >= 3 || tasks.containsKey(key)) { reply(result("busy")); return@post }
         when (method) {
           "documentRecognize" -> recognize(context, input, key, reply)
-          "documentPdf" -> pdf(context, input, key, reply)
           "documentPrint" -> print(context, input, key, reply)
         }
       } catch (_: Exception) { reply(result("unavailable")) }
@@ -138,97 +129,6 @@ object ShellDocuments {
         }
       } catch (_: Exception) { decoded?.recycle(); main.post { respond(result("file")); release() } }
     }
-  }
-  private fun attributes(input: JSONObject): PrintAttributes {
-    var size = when (input.optString("pageSize", "A4")) {
-      "A4" -> PrintAttributes.MediaSize.ISO_A4
-      "A5" -> PrintAttributes.MediaSize.ISO_A5
-      "LETTER" -> PrintAttributes.MediaSize.NA_LETTER
-      else -> throw IllegalArgumentException("pageSize")
-    }
-    size = if (input.optBoolean("landscape")) size.asLandscape() else size.asPortrait()
-    val margin = input.optDouble("marginMm", 12.0).also { require(it.isFinite() && it in 0.0..40.0) }
-    val mils = (margin / 25.4 * 1000).toInt()
-    return PrintAttributes.Builder().setMediaSize(size).setResolution(PrintAttributes.Resolution("pdf", "PDF", 300, 300))
-      .setColorMode(PrintAttributes.COLOR_MODE_COLOR).setMinMargins(PrintAttributes.Margins(mils, mils, mils, mils)).build()
-  }
-  private fun pdf(context: Context, input: JSONObject, key: String, reply: (JSONObject) -> Unit) {
-    if (pdfBusy) { reply(result("busy")); return }
-    val host = ShellCapabilities.hostActivity() ?: run { reply(result("unavailable")); return }
-    // These framework constructors are hidden in the SDK. Guard linkage on each OS
-    // before creating a renderer, so an unsupported implementation cannot crash RN.
-    try { object : ZijinhuaLayoutCallback() {}; object : ZijinhuaWriteCallback() {} }
-    catch (_: LinkageError) { reply(result("unsupported")); return }
-    val target = file(context, input, false)
-    val html = input.getString("html").also { require(it.toByteArray().size <= 2 * 1024 * 1024 && it.isNotBlank()) }
-    val attrs = attributes(input)
-    pdfBusy = true
-    val temporary = File(target.parentFile, "${target.name}.pdf-${java.util.UUID.randomUUID()}")
-    var done = false; var started = false
-    var view: WebView? = null; var adapter: PrintDocumentAdapter? = null; var descriptor: ParcelFileDescriptor? = null
-    val cancel = CancellationSignal()
-    lateinit var timeout: Runnable
-    fun finish(value: JSONObject) {
-      if (done) return
-      done = true; tasks.remove(key); owners.remove(key); main.removeCallbacks(timeout); pdfBusy = false
-      runCatching { cancel.cancel() }; runCatching { descriptor?.close() }; runCatching { adapter?.onFinish() }; runCatching { view?.stopLoading(); view?.destroy() }; view = null
-      io.execute { temporary.delete() }; reply(value)
-    }
-    timeout = Runnable { finish(result("timeout")) }
-    tasks[key] = { finish(result("cancel")) }; owners[key] = host; main.postDelayed(timeout, 45000)
-    try {
-      view = WebView(host).apply {
-        settings.javaScriptEnabled = false; settings.allowFileAccess = false; settings.allowContentAccess = false; settings.blockNetworkLoads = true
-        webViewClient = object : WebViewClient() {
-          override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest) = true
-          override fun onPageFinished(web: WebView, url: String) {
-            if (done || started) return
-            started = true
-            try {
-              adapter = web.createPrintDocumentAdapter(input.optString("title", "Document").take(100)).also { it.onStart() }
-              adapter!!.onLayout(null, attrs, cancel, object : ZijinhuaLayoutCallback() {
-                override fun onLayoutFinished(info: PrintDocumentInfo, changed: Boolean) {
-                  if (done) return
-                  io.execute {
-                    try {
-                      require(target.parentFile?.isDirectory == true || target.parentFile?.mkdirs() == true)
-                      val fd = ParcelFileDescriptor.open(temporary, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE)
-                      main.post {
-                        if (done) { fd.close(); temporary.delete(); return@post }
-                        descriptor = fd
-                        try {
-                          adapter!!.onWrite(arrayOf(PageRange.ALL_PAGES), fd, cancel, object : ZijinhuaWriteCallback() {
-                            override fun onWriteFinished(pages: Array<PageRange>) {
-                              if (done) return
-                              runCatching { descriptor?.close() }; descriptor = null
-                              // WebView layout may report PAGE_COUNT_UNKNOWN. Count the written PDF on IO.
-                              io.execute {
-                                try {
-                                  val count = android.graphics.pdf.PdfRenderer(ParcelFileDescriptor.open(temporary, ParcelFileDescriptor.MODE_READ_ONLY)).use { it.pageCount }
-                                  main.post {
-                                    if (!done) try { Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING); finish(result().put("pages", count)) }
-                                    catch (_: Exception) { finish(result("file")) }
-                                  }
-                                } catch (_: Exception) { main.post { finish(result("file")) } }
-                              }
-                            }
-                            override fun onWriteFailed(error: CharSequence?) { finish(result("file")) }
-                            override fun onWriteCancelled() { finish(result("cancel")) }
-                          })
-                        } catch (_: LinkageError) { finish(result("unsupported")) } catch (_: Exception) { finish(result("file")) }
-                      }
-                    } catch (_: Exception) { main.post { finish(result("file")) } }
-                  }
-                }
-                override fun onLayoutFailed(error: CharSequence?) { finish(result("unavailable")) }
-                override fun onLayoutCancelled() { finish(result("cancel")) }
-              }, null)
-            } catch (_: LinkageError) { finish(result("unsupported")) } catch (_: Exception) { finish(result("unavailable")) }
-          }
-        }
-        loadDataWithBaseURL("https://document.invalid/", html, "text/html", "UTF-8", null)
-      }
-    } catch (_: LinkageError) { finish(result("unsupported")) } catch (_: Exception) { finish(result("unavailable")) }
   }
   private fun print(context: Context, input: JSONObject, key: String, reply: (JSONObject) -> Unit) {
     val source = file(context, input)

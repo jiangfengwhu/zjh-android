@@ -11,11 +11,7 @@ import com.zijinhua.app.bundle.ReleaseStore
 import com.zijinhua.app.bundle.SplitBundle
 import com.zijinhua.app.bundle.ApplicationStore
 import com.zijinhua.app.shell.ShellAi
-import com.zijinhua.app.shell.ShellBluetooth
 import com.zijinhua.app.shell.ShellCapabilities
-import com.zijinhua.app.shell.ShellHealth
-import com.zijinhua.app.shell.ShellNfc
-import com.zijinhua.app.shell.ShellPhone
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -182,10 +178,6 @@ object PluginCenter {
       applyStagedUpdates()
     })
     ShellCapabilities.register(registry)
-    ShellPhone.register(registry)
-    ShellHealth.register(registry)
-    ShellBluetooth.register(registry)
-    ShellNfc.register(registry)
     ShellAi.register(registry, context)
     Log.i(TAG, "builtins registered for ${context.packageName}")
   }

@@ -2,118 +2,72 @@ package com.zijinhua.app.shell
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import androidx.core.content.ContextCompat
-import com.zijinhua.app.plugin.PluginRegistry
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.async
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 object ShellBluetooth {
-  private const val TAG = "ShellBluetooth"
-
-  fun register(registry: PluginRegistry) {
-    registry.register("shell", "bluetoothState") { _ -> state().toString() }
-    registry.register("shell", "bluetoothDevices") { _ -> devices().toString() }
-    registry.register("shell", "bluetoothScan") { payload -> scan(JSONObject(payload.ifBlank { "{}" })).toString() }
+  private var scanning = false // main looper
+  fun state(context: Context): JSONObject {
+    val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
+    if (adapter == null) return ShellOperations.result().put("present", false).put("enabled", false)
+    if (!canConnect(context)) return ShellOperations.result("permission")
+    return ShellOperations.result().put("present", true).put("enabled", adapter.isEnabled)
   }
-
-  private fun state(): JSONObject {
-    val adapter = adapter() ?: return JSONObject().put("ok", true).put("present", false).put("enabled", false)
-    if (!canConnect(ShellCapabilities.hostContext())) return JSONObject().put("ok", false).put("error", "permission").put("present", true)
-    return JSONObject().put("ok", true).put("present", true).put("enabled", adapter.isEnabled)
-  }
-
-  private fun devices(): JSONObject {
-    val context = ShellCapabilities.hostContext()
-    if (!canConnect(context)) return JSONObject().put("ok", false).put("error", "permission")
-    val adapter = adapter() ?: return JSONObject().put("ok", false).put("error", "unavailable")
-    if (!adapter.isEnabled) return JSONObject().put("ok", false).put("error", "disabled")
-    val items = JSONArray()
-    bonded(adapter).forEach { device ->
-      items.put(JSONObject().put("name", deviceName(device)).put("address", device.address ?: ""))
-    }
-    Log.i(TAG, "bluetooth paired count=${items.length()}")
-    return JSONObject().put("ok", true).put("items", items)
-  }
-
   @SuppressLint("MissingPermission")
-  private fun scan(input: JSONObject): JSONObject {
-    val context = ShellCapabilities.hostContext()
-    if (!canScan(context)) return JSONObject().put("ok", false).put("error", "permission")
-    val adapter = adapter() ?: return JSONObject().put("ok", false).put("error", "unavailable")
-    if (!adapter.isEnabled) return JSONObject().put("ok", false).put("error", "disabled")
-    val scanner = adapter.bluetoothLeScanner ?: return JSONObject().put("ok", false).put("error", "scanner")
-    val seconds = input.optInt("seconds", 4).coerceIn(1, 8)
+  suspend fun devices(context: Context): JSONObject = withContext(ShellOperations.providerIo) {
+    if (!canConnect(context)) return@withContext ShellOperations.result("permission")
+    val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return@withContext ShellOperations.result("unsupported")
+    if (!adapter.isEnabled) return@withContext ShellOperations.result("disabled")
+    ShellOperations.result().put("items", JSONArray(adapter.bondedDevices.map { JSONObject().put("name", it.name ?: "").put("address", it.address) }))
+  }
+  @SuppressLint("MissingPermission")
+  suspend fun scan(context: Context, input: JSONObject): JSONObject {
+    if (scanning) return ShellOperations.result("busy")
+    if (!canScan(context)) return ShellOperations.result("permission")
+    val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter ?: return ShellOperations.result("unsupported")
+    if (!adapter.isEnabled) return ShellOperations.result("disabled")
+    val scanner = adapter.bluetoothLeScanner ?: return ShellOperations.result("unsupported")
+    val seconds = input.optInt("seconds", 4).also { require(it in 1..15) }
     val found = ConcurrentHashMap<String, JSONObject>()
-    val names = canConnect(context)
-    val ended = CountDownLatch(1)
-    val failure = java.util.concurrent.atomic.AtomicInteger(0)
+    val failed = CompletableDeferred<Int>()
+    val closed = java.util.concurrent.atomic.AtomicBoolean(false)
     val callback = object : ScanCallback() {
-      override fun onScanFailed(errorCode: Int) { failure.set(errorCode); ended.countDown() }
+      override fun onScanFailed(errorCode: Int) { failed.complete(errorCode) }
+      override fun onBatchScanResults(results: MutableList<ScanResult>) { results.forEach { onScanResult(0, it) } }
       override fun onScanResult(callbackType: Int, result: ScanResult) {
-        val address = result.device.address ?: return
-        if (found.size >= 40 && !found.containsKey(address)) return
-        found[address] = JSONObject()
-          .put("name", if (names) deviceName(result.device) else "")
-          .put("address", address)
-          .put("rssi", result.rssi)
+        if (closed.get()) return
+        val address = result.device.address
+        if (found.size >= 100 && !found.containsKey(address)) return
+        found[address] = JSONObject().put("name", result.scanRecord?.deviceName ?: "").put("address", address).put("rssi", result.rssi)
       }
     }
+    scanning = true
     try {
       scanner.startScan(callback)
-      ended.await(seconds.toLong(), TimeUnit.SECONDS)
-    } catch (error: SecurityException) {
-      Log.i(TAG, "bluetooth scan denied")
-      return JSONObject().put("ok", false).put("error", "permission")
-    } finally {
-      try {
-        scanner.stopScan(callback)
-      } catch (_: SecurityException) {
+      val error = coroutineScope {
+        val timer = async { delay(seconds * 1000L); 0 }
+        try { select<Int> { failed.onAwait { it }; timer.onAwait { it } } } finally { timer.cancel() }
       }
-    }
-    if (failure.get() != 0) return JSONObject().put("ok", false).put("error", "scan").put("nativeCode", failure.get())
-    val items = JSONArray()
-    found.values.forEach { items.put(it) }
-    Log.i(TAG, "bluetooth scan count=${items.length()}")
-    return JSONObject().put("ok", true).put("items", items)
+      if (error != 0) return ShellOperations.result(when (error) { 1, 5, 6 -> "busy"; 4 -> "unsupported"; else -> "unavailable" }).put("nativeCode", error)
+      if (!adapter.isEnabled) return ShellOperations.result("disabled")
+      return ShellOperations.result().put("items", JSONArray(found.values.sortedByDescending { it.optInt("rssi") }))
+    } finally { closed.set(true); runCatching { scanner.stopScan(callback) }; scanning = false }
   }
-
-  private fun adapter() = ShellCapabilities.hostContext().getSystemService(BluetoothManager::class.java)?.adapter
-
-  @SuppressLint("MissingPermission")
-  private fun bonded(adapter: android.bluetooth.BluetoothAdapter): Set<BluetoothDevice> {
-    return adapter.bondedDevices ?: emptySet()
-  }
-
-  @SuppressLint("MissingPermission")
-  private fun deviceName(device: BluetoothDevice): String {
-    return try {
-      device.name ?: ""
-    } catch (_: SecurityException) {
-      ""
-    }
-  }
-
-  private fun canConnect(context: android.content.Context): Boolean {
-    if (Build.VERSION.SDK_INT < 31) return true
-    return granted(context, Manifest.permission.BLUETOOTH_CONNECT)
-  }
-
-  private fun canScan(context: android.content.Context): Boolean {
-    if (Build.VERSION.SDK_INT >= 31) return granted(context, Manifest.permission.BLUETOOTH_SCAN)
-    return granted(context, Manifest.permission.ACCESS_FINE_LOCATION)
-  }
-
-  private fun granted(context: android.content.Context, permission: String): Boolean {
-    return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-  }
+  private fun canConnect(context: Context) = Build.VERSION.SDK_INT < 31 || granted(context, Manifest.permission.BLUETOOTH_CONNECT)
+  private fun canScan(context: Context) = granted(context, if (Build.VERSION.SDK_INT >= 31) Manifest.permission.BLUETOOTH_SCAN else Manifest.permission.ACCESS_FINE_LOCATION)
+  private fun granted(context: Context, permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
 }
