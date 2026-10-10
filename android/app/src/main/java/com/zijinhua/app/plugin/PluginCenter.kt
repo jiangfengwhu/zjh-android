@@ -183,7 +183,9 @@ object PluginCenter {
   }
 
   private fun checkUpdates(): String {
-    return io.submit<String> { checkOnIo() }.get(300, TimeUnit.SECONDS)
+    val task = io.submit<String> { checkOnIo() }
+    try { return task.get(300, TimeUnit.SECONDS) }
+    catch (error: Exception) { task.cancel(true); throw error }
   }
 
   private fun checkOnIo(): String {

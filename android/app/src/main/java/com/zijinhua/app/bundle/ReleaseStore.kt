@@ -124,7 +124,7 @@ class ReleaseStore(private val context: Context) {
 
   /** 读线上清单，把这一套里本机还没有的包体下载齐，再记成「可以换上」。同一时刻只跑一个。 */
   fun stage() {
-    STAGE.lock()
+    STAGE.lockInterruptibly()
     try {
       stageLocked()
     } finally {
@@ -161,6 +161,7 @@ class ReleaseStore(private val context: Context) {
       blobs.add(plugin to "$CDN/v1/plugins/${plugin.getString("id")}/$sha")
     }
     downloadBlobs(blobs)
+    check(!Thread.currentThread().isInterrupted) { "更新已取消" }
     incoming.mkdirs()
     writeAtomic(File(incoming, "$id.json"), text.toByteArray(Charsets.UTF_8))
     clearIncoming(id)
@@ -433,16 +434,26 @@ class ReleaseStore(private val context: Context) {
   private fun downloadBlobs(blobs: List<Pair<JSONObject, String>>) {
     val cancelled = AtomicBoolean(false)
     val connections = ConcurrentHashMap.newKeySet<HttpURLConnection>()
+    val progress = ConcurrentHashMap<HttpURLConnection, Long>()
+    val deadline = android.os.SystemClock.elapsedRealtime() + 180000
+    val watchdog = WATCHDOG.scheduleAtFixedRate({
+      val now = android.os.SystemClock.elapsedRealtime()
+      if (now >= deadline || progress.values.any { now - it >= 30000 }) {
+        cancelled.set(true)
+        connections.forEach { runCatching { it.disconnect() } }
+      }
+    }, 1, 1, java.util.concurrent.TimeUnit.SECONDS)
     val completion = ExecutorCompletionService<Unit>(DOWNLOADS)
     val entries = blobs.distinctBy { it.first.getString("sha256") }
     for ((item, url) in entries) completion.submit(java.util.concurrent.Callable {
-      ensureBlob(item.getString("sha256"), item.getLong("bytes"), url, cancelled, connections)
+      ensureBlob(item.getString("sha256"), item.getLong("bytes"), url, cancelled, connections, progress)
     })
     var failure: Throwable? = null
     var interrupted = false
     var remaining = entries.size
     // Drain every worker before releasing STAGE, so a retry cannot race its temp files.
-    while (remaining > 0) {
+    try {
+      while (remaining > 0) {
       try {
         val task = completion.take()
         remaining--
@@ -454,11 +465,13 @@ class ReleaseStore(private val context: Context) {
         connections.forEach { runCatching { it.disconnect() } }
       }
     }
+    } finally { watchdog.cancel(false) }
     if (interrupted) Thread.currentThread().interrupt()
     failure?.let { throw IllegalStateException("配套下载未完成，请重试", it) }
+    check(!cancelled.get()) { "配套下载超时，请重试" }
   }
 
-  private fun ensureBlob(sha: String, bytes: Long, url: String, cancelled: AtomicBoolean, connections: MutableSet<HttpURLConnection>) {
+  private fun ensureBlob(sha: String, bytes: Long, url: String, cancelled: AtomicBoolean, connections: MutableSet<HttpURLConnection>, progress: MutableMap<HttpURLConnection, Long>) {
     fun check() { if (cancelled.get()) throw java.io.IOException("配套下载已取消") }
     check()
     val file = blob(sha)
@@ -472,6 +485,7 @@ class ReleaseStore(private val context: Context) {
     connection.connectTimeout = 10000
     connection.readTimeout = 120000
     connections.add(connection)
+    progress[connection] = android.os.SystemClock.elapsedRealtime()
     try {
       check()
       if (connection.responseCode !in 200..299) throw IllegalStateException("配套下载失败 ${connection.responseCode}")
@@ -482,6 +496,7 @@ class ReleaseStore(private val context: Context) {
           check()
           val count = input.read(buffer)
           if (count < 0) break
+          progress[connection] = android.os.SystemClock.elapsedRealtime()
           total += count
           if (total > bytes) throw IllegalStateException("配套超过声明大小")
           output.write(buffer, 0, count)
@@ -492,6 +507,7 @@ class ReleaseStore(private val context: Context) {
       if (file.exists() && !file.delete()) throw IllegalStateException("无法替换配套包")
       if (!temporary.renameTo(file)) throw IllegalStateException("无法保存配套包")
     } finally {
+      progress.remove(connection)
       connections.remove(connection)
       connection.disconnect()
       temporary.delete()
@@ -552,6 +568,7 @@ class ReleaseStore(private val context: Context) {
     connection.connectTimeout = 10000
     connection.readTimeout = 20000
     connection.requestMethod = "GET"
+    val deadline = WATCHDOG.schedule({ connection.disconnect() }, 30, java.util.concurrent.TimeUnit.SECONDS)
     try {
       val code = connection.responseCode
       val stream = if (code in 200..299) connection.inputStream else connection.errorStream
@@ -560,6 +577,7 @@ class ReleaseStore(private val context: Context) {
       if (code !in 200..299) throw IllegalStateException("配套清单读取失败 $code ${body.take(180)}")
       return body
     } finally {
+      deadline.cancel(false)
       connection.disconnect()
     }
   }
@@ -573,5 +591,6 @@ class ReleaseStore(private val context: Context) {
     val STATE = Any()
     val STAGE = ReentrantLock()
     val DOWNLOADS = Executors.newFixedThreadPool(2)
+    val WATCHDOG = Executors.newScheduledThreadPool(2)
   }
 }

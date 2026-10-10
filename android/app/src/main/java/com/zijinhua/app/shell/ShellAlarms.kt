@@ -183,9 +183,25 @@ object ShellAlarms {
     return PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
   }
 
-  @Synchronized
+  private val captured = java.util.concurrent.ConcurrentLinkedQueue<Pair<String, Long>>()
+  private val eventIo = java.util.concurrent.Executors.newSingleThreadExecutor()
   fun capture(context: Context, intent: Intent?) {
     val raw = intent?.getStringExtra("notificationEvent") ?: return
+    intent.removeExtra("notificationEvent")
+    if (raw.length > 8192) return
+    captured.add(raw to System.currentTimeMillis())
+    val app = context.applicationContext
+    eventIo.execute { runCatching { synchronized(this) { drainCaptured(app) } }.onFailure { Log.w(TAG, "notification event persistence deferred") } }
+  }
+  // RN reads pending clicks even if it subscribes before the disk write finishes.
+  private fun drainCaptured(context: Context) {
+    while (true) {
+      val (raw, atMs) = captured.poll() ?: return
+      try { persistCaptured(context, raw, atMs) }
+      catch (error: Exception) { captured.add(raw to atMs); throw error }
+    }
+  }
+  private fun persistCaptured(context: Context, raw: String, atMs: Long) {
     val event = try {
       JSONObject(raw).apply {
         require(optString("token").matches(Regex("[a-f0-9-]{36}")))
@@ -193,13 +209,12 @@ object ShellAlarms {
         require(optString("id").matches(Regex("[A-Za-z0-9._-]{1,80}")))
         require(optString("action").matches(Regex("[A-Za-z0-9._-]{1,40}")))
         require((optJSONObject("params")?.toString()?.toByteArray()?.size ?: 0) <= 4096)
-        put("atMs", System.currentTimeMillis())
+        put("atMs", atMs)
       }
-    } catch (_: Exception) { intent.removeExtra("notificationEvent"); return }
+    } catch (_: Exception) { return }
     val entries = events(context).filter { it.optString("token") != event.getString("token") }.takeLast(63) + event
     saveEvents(context, entries)
     NotificationManagerCompat.from(context).cancel("${event.getString("appId")}:${event.getString("id")}", 0)
-    intent.removeExtra("notificationEvent")
   }
 
   private fun events(context: Context): List<JSONObject> {
@@ -212,6 +227,7 @@ object ShellAlarms {
 
   @Synchronized
   fun notificationEvents(context: Context, appId: String, tokens: JSONArray?): JSONObject {
+    drainCaptured(context)
     val ack = tokens?.let { array -> (0 until array.length()).map { array.getString(it) }.toSet() } ?: emptySet()
     val entries = events(context).filterNot { it.optString("appId") == appId && it.optString("token") in ack }
     if (ack.isNotEmpty()) saveEvents(context, entries)

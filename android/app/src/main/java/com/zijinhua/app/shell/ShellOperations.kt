@@ -27,7 +27,7 @@ import kotlin.coroutines.resumeWithException
 
 /** Callback waits suspend coroutines; provider and file IO have separate bounded pools. */
 object ShellOperations {
-  val methods = setOf("operationCancel", "operationStopApp", "operationSuspendApp", "location", "pick", "exportFile", "share",
+  val methods = setOf("operationCancel", "operationStopApp", "operationSuspendApp", "location", "pick", "exportFile", "share", "fileCommit",
     "device", "torch", "openUrl", "calendarEvents", "calendarInsert", "calendarRemove",
     "healthStatus", "healthPermissions", "requestHealth", "healthSummary",
     "bluetoothState", "bluetoothDevices", "bluetoothScan", "nfcStatus", "nfcRead")
@@ -71,6 +71,16 @@ object ShellOperations {
             withTimeout(timeout) {
               when (method) {
                 "location" -> location(context, input)
+                "fileCommit" -> provider { _, alive ->
+                  val root = java.io.File(context.filesDir, "applications/$appId").canonicalFile
+                  val target = java.io.File(input.getString("path")).canonicalFile
+                  val source = java.io.File(input.getString("temporary")).canonicalFile
+                  require(target.path.startsWith(root.path + java.io.File.separator))
+                  require(source.parentFile == target.parentFile && source != target && source.isFile)
+                  check(alive())
+                  android.system.Os.rename(source.path, target.path)
+                  result()
+                }
                 "pick" -> ShellFileTransfers.importFile(context, input)
                 "exportFile" -> ShellFileTransfers.export(context, input)
                 "share" -> ShellFileTransfers.share(context, input)
