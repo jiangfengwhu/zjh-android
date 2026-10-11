@@ -548,12 +548,12 @@ class ReleaseStore(private val context: Context) {
   private fun writeAtomic(dest: File, bytes: ByteArray) {
     dest.parentFile?.mkdirs()
     val tmp = File(dest.parentFile, "${dest.name}.tmp")
-    tmp.writeBytes(bytes)
-    if (dest.exists() && !dest.delete()) Log.e(TAG, "could not replace ${dest.name}")
-    if (!tmp.renameTo(dest)) {
-      dest.writeBytes(bytes)
-      tmp.delete()
-    }
+    try {
+      tmp.outputStream().use { output -> output.write(bytes); output.fd.sync() }
+      // POSIX rename replaces the destination atomically; retain the accepted
+      // pointer/document if writing or replacing its successor fails.
+      android.system.Os.rename(tmp.absolutePath, dest.absolutePath)
+    } finally { tmp.delete() }
   }
 
   private fun installedStamp(): String {
