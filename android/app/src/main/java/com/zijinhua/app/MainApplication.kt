@@ -18,8 +18,8 @@ import com.facebook.react.common.build.ReactBuildConfig
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.zijinhua.app.bundle.ReleaseCheck
 import com.zijinhua.app.bundle.ReleaseStore
-import com.zijinhua.app.host.PluginHostPackage
-import com.zijinhua.app.plugin.PluginCenter
+import com.zijinhua.app.host.NativeHostPackage
+import com.zijinhua.app.host.NativeServices
 
 class MainApplication : Application(), ReactApplication, Configuration.Provider {
   override val workManagerConfiguration: Configuration
@@ -34,7 +34,7 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
 
   fun whenReactReady(callback: (Throwable?) -> Unit) {
     // Receivers and WorkManager can start the process without opening a screen.
-    // Only a UI request needs the existing bundle/plugin/RN preparation chain.
+    // Only a UI request needs bundle and RN preparation.
     if (preparationStarted.compareAndSet(false, true)) prepareReact()
     reactReady.whenComplete { _, error -> mainHandler.post { callback(error) } }
   }
@@ -74,7 +74,7 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
         PackageList(this).packages.apply {
           // Packages that cannot be autolinked yet can be added manually here, for example:
           // add(MyReactNativePackage())
-          add(PluginHostPackage())
+          add(NativeHostPackage())
         },
       jsBundleFilePath = bundlePath,
     )
@@ -93,8 +93,16 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
   private fun prepareReact() {
     val started = SystemClock.elapsedRealtime()
     fun milestone(stage: String) = Log.i(TAG, "startup $stage elapsedMs=${SystemClock.elapsedRealtime() - started}")
-    // Establish the Activity/splash first. Disk verification and DEX loading
-    // must finish before RN captures the vendor path and native view managers.
+    // Initialize native libraries while the worker prepares the release on disk.
+    // ReactHost must still wait for the final vendor path and native services.
+    val nativeReady = CompletableFuture<Unit>()
+    mainHandler.post {
+      try {
+        loadReactNative(this)
+        milestone("native-libraries-ready")
+        nativeReady.complete(Unit)
+      } catch (error: Exception) { nativeReady.completeExceptionally(error) }
+    }
     val startup = Executors.newSingleThreadExecutor { task -> Thread(task, "ShellStartup") }
     startup.execute {
       try {
@@ -103,11 +111,12 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
           releasePrepared = true
         }
         milestone("release-prepared")
-        PluginCenter.install(this)
+        // ReactHost needs initialized RN native libraries.
+        NativeServices.install(this)
+        nativeReady.get()
         milestone("services-registered")
         mainHandler.post {
           try {
-            loadReactNative(this)
             reactHost.start()
             milestone("react-started")
             reactReady.complete(Unit)

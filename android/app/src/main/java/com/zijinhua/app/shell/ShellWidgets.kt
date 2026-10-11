@@ -68,7 +68,8 @@ object ShellWidgets {
       if (input.has("path")) {
         val source = File(input.getString("path")).canonicalFile
         val appRoot = File(context.filesDir, "applications/$appId").canonicalFile
-        require(source.path.startsWith(appRoot.path + File.separator) && source.isFile && source.length() <= 20 * 1024 * 1024)
+        val packageRoot = File(context.filesDir, "application-bundles/$appId").canonicalFile
+        require((source.path.startsWith(appRoot.path + File.separator) || source.path.startsWith(packageRoot.path + File.separator)) && source.isFile && source.length() <= 20 * 1024 * 1024)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }; BitmapFactory.decodeFile(source.path, bounds)
         require(bounds.outWidth > 0 && bounds.outHeight > 0)
         var sample = 1; while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 320) sample *= 2

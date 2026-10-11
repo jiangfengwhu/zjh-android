@@ -1,9 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { createHash } = require('node:crypto');
 const { runtimeVersion } = require('./runtime-version.cjs');
 
-const matches = (bytes, item) => bytes.length === item.bytes && createHash('sha256').update(bytes).digest('hex') === item.sha256;
 async function readFile(file) { try { return await fs.readFile(file); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; } }
 async function writeChanged(file, bytes) {
   const previous = await readFile(file);
@@ -15,18 +13,20 @@ async function writeChanged(file, bytes) {
 async function request(url) {
   return fetch(url, { signal: AbortSignal.timeout(60000) });
 }
-async function packageBytes(root, cdn, kind, item, destination) {
+async function packageBytes(root, cdn, kind, item, localRelease) {
   if (!/^[a-f0-9]{64}$/.test(item?.sha256) || !Number.isSafeInteger(item.bytes) || item.bytes < 1) throw new Error('包体身份无效');
   const cache = path.join(root, '.cache/apk', item.sha256);
   const local = path.join(root, '../zjh-dynamic/dist/bundles', kind === 'vendor' ? 'vendor.bundle' : 'app.bundle');
-  for (const file of [destination, cache, local]) {
-    const bytes = await readFile(file);
-    if (bytes && matches(bytes, item)) { console.log(`APK cache hit: ${kind}/${item.sha256.slice(0, 12)}`); return bytes; }
+  const cached = await readFile(cache);
+  if (cached?.length === item.bytes) { console.log(`APK cache hit: ${kind}/${item.sha256.slice(0, 12)}`); return cached; }
+  // Fixed output filenames need a matching release identity, not just equal size.
+  let bytes = localRelease?.[kind]?.sha256 === item.sha256 ? await readFile(local) : undefined;
+  if (bytes?.length !== item.bytes) {
+    const response = await request(`${cdn}/v1/${kind}/${item.sha256}`);
+    if (!response.ok) throw new Error(`包体下载失败：${response.status}`);
+    bytes = Buffer.from(await response.arrayBuffer());
   }
-  const response = await request(`${cdn}/v1/${kind}/${item.sha256}`);
-  if (!response.ok) throw new Error(`包体下载失败：${response.status}`);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (!matches(bytes, item)) throw new Error('包体校验失败');
+  if (bytes.length !== item.bytes) throw new Error('包体下载未完成');
   await fs.mkdir(path.dirname(cache), { recursive: true });
   await writeChanged(cache, bytes);
   return bytes;
@@ -50,15 +50,19 @@ async function main() {
   if (!host || host.engineAbi !== local.engineAbi || Object.keys(host.shared).length !== Object.keys(shared).length || Object.entries(shared).some(([name, version]) => host.shared[name] !== version)) throw new Error('宿主包与本次 APK 的应用契约不匹配');
   const assets = path.join(root, 'android/app/src/main/assets');
   await fs.mkdir(assets, { recursive: true });
+  const localText = await readFile(path.join(root, '../zjh-dynamic/dist/bundles/release.json'));
+  const localRelease = localText ? JSON.parse(localText.toString('utf8')) : undefined;
   const prepared = [];
   for (const [kind, filename] of [['vendor', 'index.android.bundle'], ['app', 'app.bundle']]) {
     const item = release[kind];
     if (!item || !/^[a-f0-9]{64}$/.test(item.sha256)) throw new Error(`无效的 ${kind} 清单`);
     const destination = path.join(assets, filename);
-    const bytes = await packageBytes(root, cdn, kind, item, destination);
+    const bytes = await packageBytes(root, cdn, kind, item, localRelease);
     prepared.push({ destination, bytes });
   }
   for (const { destination, bytes } of prepared) await writeChanged(destination, bytes);
+  // Native cold boot copies these identities directly instead of hashing assets.
+  await writeChanged(path.join(assets, 'release-seed.json'), Buffer.from(JSON.stringify({ vendor: release.vendor, app: release.app })));
   await writeChanged(path.join(assets, 'runtime-version.txt'), Buffer.from(release.runtimeVersion));
   const obsoleteSeed = path.resolve(assets, 'applications', 'jolly');
   if (path.relative(assets, obsoleteSeed) !== path.join('applications', 'jolly')) throw new Error('Invalid generated seed path');

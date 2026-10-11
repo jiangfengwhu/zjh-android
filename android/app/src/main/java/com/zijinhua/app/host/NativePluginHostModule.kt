@@ -4,7 +4,7 @@ import android.util.Log
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.zijinhua.app.codegen.NativePluginHostSpec
-import com.zijinhua.app.plugin.PluginCenter
+import com.zijinhua.app.host.NativeServices
 import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
@@ -90,7 +90,7 @@ class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePlug
       return
     }
     if (pluginId == "shell" && method == "prepareApplication") {
-      PluginCenter.prepareApplicationAsync(payload, { if (current()) promise.resolve(it) }, { if (current()) promise.reject("PLUGIN_ERROR", it.message, it) }, ::current)
+      NativeServices.prepareApplicationAsync(payload, { if (current()) promise.resolve(it) }, { if (current()) promise.reject("PLUGIN_ERROR", it.message, it) }, ::current)
       return
     }
     val executor = when {
@@ -117,11 +117,11 @@ class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePlug
             }.toString()
           } finally { aiRequests.remove(id) }
         } else if (pluginId == "shell" && method == "loadApplication") {
-          PluginCenter.loadApplication(payload, reactApplicationContext, ::current)
+          NativeServices.loadApplication(payload, reactApplicationContext, ::current)
         } else if (pluginId == "shell" && method == "loadApp") {
-          try { PluginCenter.loadApp(reactApplicationContext, ::current) }
-          catch (error: Exception) { if (current()) PluginCenter.reportStartupFailure(); throw error }
-        } else PluginCenter.registry.invoke(pluginId, method, payload)
+          try { NativeServices.loadApp(reactApplicationContext, ::current) }
+          catch (error: Exception) { if (current()) NativeServices.reportStartupFailure(); throw error }
+        } else NativeServices.registry.invoke(pluginId, method, payload)
         if (!current()) return@enqueue
         Log.i(TAG, "call $pluginId.$method bytes=${result.length}")
         promise.resolve(result)

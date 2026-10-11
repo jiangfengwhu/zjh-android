@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 /** Immutable application blobs. JS checks the public SDK contract before invoking this loader. */
 class ApplicationStore(private val context: Context) {
-  private val root = File(context.filesDir, "applications")
+  private val root = File(context.filesDir, "application-bundles")
 
   private companion object {
     // Fixed stripes bound memory while keeping the same immutable blob serialized.
@@ -59,10 +59,17 @@ class ApplicationStore(private val context: Context) {
 
   data class PreparedApplication(val file: File, val assets: Map<String, String>)
 
+  private fun cachedPreparation(key: String): PreparedApplication? = synchronized(prepared) {
+    val cached = prepared[key] ?: return@synchronized null
+    // Existence only: do not hash or re-download intact warmed resources.
+    if (cached.file.isFile && cached.assets.values.all { File(it.removePrefix("file://")).isFile }) cached
+    else { prepared.remove(key); null }
+  }
+
   /** Preparation and execution share the exact same immutable paths. */
   fun prepare(manifest: JSONObject): PreparedApplication {
     val key = root.absolutePath + "/" + manifest.getString("appId") + ":" + manifest.getString("releaseId")
-    synchronized(prepared) { prepared[key]?.let { return it } }
+    cachedPreparation(key)?.let { return it }
     val job = Preparation()
     job.task = FutureTask<PreparedApplication> {
       val started = System.nanoTime()
@@ -99,7 +106,7 @@ class ApplicationStore(private val context: Context) {
       }
     }
     val flight = synchronized(prepared) {
-      prepared[key]?.let {
+      cachedPreparation(key)?.let {
         Log.i("ApplicationStore", "reuse prepared app=${manifest.getString("appId")} assets=${it.assets.size}")
         return it
       }
@@ -168,6 +175,13 @@ class ApplicationStore(private val context: Context) {
     val directory = File(root, appId).apply { mkdirs() }
     val file = File(directory, "$sha.bundle")
     if (complete(file, bytes)) return file
+    // Reuse existing immutable downloads when upgrading the APK. Business
+    // paths stay untouched; only this exact package filename is relocated.
+    val legacy = File(context.filesDir, "applications/$appId/$sha.bundle")
+    if (complete(legacy, bytes)) {
+      try { android.system.Os.rename(legacy.absolutePath, file.absolutePath); return file }
+      catch (_: android.system.ErrnoException) { /* Download again if relocation is unavailable. */ }
+    }
     val temporary = File(directory, "$sha.tmp")
     try {
       val aliases = aliases(appId)

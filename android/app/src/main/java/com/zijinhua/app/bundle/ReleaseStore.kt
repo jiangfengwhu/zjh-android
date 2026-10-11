@@ -7,18 +7,14 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.security.MessageDigest
 import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.Executors
 import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** 当前这一套里的一个 DEX 插件：类名和 DEX 文件。 */
-data class PluginFile(val id: String, val className: String, val dex: File)
-
 /**
- * 手机上的「整套」：一份 vendor（第三方库和 RN，冷启动的主包）、一份 app（我们自己的全部代码）、若干 DEX 插件。
+ * 手机上的「整套」：一份 vendor（第三方库和 RN，冷启动的主包）、一份 app（我们自己的全部代码）。
  *
  * 磁盘布局都在 filesDir/release 下：
  * - blobs/<sha256>：包体，按内容命名，写入后不再改。
@@ -46,22 +42,6 @@ class ReleaseStore(private val context: Context) {
     val file = blob(app.getString("sha256"))
     if (!file.isFile || file.length() == 0L) throw IllegalStateException("app 包文件缺失")
     return file
-  }
-
-  fun plugins(): List<PluginFile> {
-    val active = readActive() ?: return emptyList()
-    val items = active.optJSONArray("plugins") ?: return emptyList()
-    val found = mutableListOf<PluginFile>()
-    for (index in 0 until items.length()) {
-      val item = items.getJSONObject(index)
-      val dex = blob(item.getString("sha256"))
-      if (!dex.isFile) {
-        Log.e(TAG, "plugin dex missing id=${item.optString("id")}")
-        continue
-      }
-      found.add(PluginFile(item.getString("id"), item.getString("className"), dex))
-    }
-    return found
   }
 
   fun readActive(): JSONObject? {
@@ -154,12 +134,6 @@ class ReleaseStore(private val context: Context) {
     blobs.add(vendor to "$CDN/v1/vendor/${vendor.getString("sha256")}")
     val app = release.getJSONObject("app")
     blobs.add(app to "$CDN/v1/app/${app.getString("sha256")}")
-    val plugins = release.getJSONArray("plugins")
-    for (index in 0 until plugins.length()) {
-      val plugin = plugins.getJSONObject(index)
-      val sha = plugin.getString("sha256")
-      blobs.add(plugin to "$CDN/v1/plugins/${plugin.getString("id")}/$sha")
-    }
     downloadBlobs(blobs)
     check(!Thread.currentThread().isInterrupted) { "更新已取消" }
     incoming.mkdirs()
@@ -213,40 +187,28 @@ class ReleaseStore(private val context: Context) {
   /** 新装或升级了 APK，或者现行的一套坏了：清空，改用 APK 里自带的 vendor 和 app。 */
   private fun resetToSeed(stamp: String) {
     root.deleteRecursively()
-    legacyCleanup()
     blobs.mkdirs()
     docs.mkdirs()
-    val vendor = copyAsset("index.android.bundle")
-      ?: throw IllegalStateException("APK 里没有主包 index.android.bundle")
-    val app = copyAsset("app.bundle")
-    if (app == null) Log.e(TAG, "apk has no app.bundle, run npm run prepare:apk before building")
+    val seed = context.assets.open("release-seed.json").bufferedReader().use { JSONObject(it.readText()) }
+    val vendor = copyAsset("index.android.bundle", seed.getJSONObject("vendor"))
+    val app = copyAsset("app.bundle", seed.getJSONObject("app"))
     val name = "seed-$stamp"
     val doc = JSONObject()
       .put("format", FORMAT)
       .put("runtimeVersion", BuildConfig.BUNDLE_RUNTIME_VERSION)
       .put("id", name)
       .put("vendor", JSONObject().put("sha256", vendor.first).put("bytes", vendor.second))
-      .put("plugins", org.json.JSONArray())
-    if (app != null) doc.put("app", JSONObject().put("sha256", app.first).put("bytes", app.second))
+    doc.put("app", JSONObject().put("sha256", app.first).put("bytes", app.second))
     writeAtomic(File(docs, "$name.json"), doc.toString().toByteArray(Charsets.UTF_8))
     writePointer("current", name)
     File(root, "apk-stamp").writeText(stamp)
-    Log.i(TAG, "seeded release $name vendor=${vendor.second} app=${app?.second ?: 0}")
+    Log.i(TAG, "seeded release $name vendor=${vendor.second} app=${app.second}")
   }
 
-  /** 旧版本的目录（bundles、plugins）不再使用，装到新版本时一次性清掉。 */
-  private fun legacyCleanup() {
-    File(context.filesDir, "bundles").deleteRecursively()
-    File(context.filesDir, "plugins").deleteRecursively()
-    context.filesDir.listFiles()?.forEach { file ->
-      if (file.name.startsWith("plugins-quarantine-")) file.deleteRecursively()
-    }
-  }
-
-  private fun copyAsset(name: String): Pair<String, Long>? {
-    return try {
-      val tmp = File(blobs, "asset-$name.tmp")
-      val digest = MessageDigest.getInstance("SHA-256")
+  private fun copyAsset(name: String, identity: JSONObject): Pair<String, Long> {
+    val sha = identity.getString("sha256")
+    val tmp = File(blobs, "asset-$name.tmp")
+    try {
       var total = 0L
       context.assets.open(name).use { input ->
         tmp.outputStream().use { output ->
@@ -254,21 +216,17 @@ class ReleaseStore(private val context: Context) {
           while (true) {
             val read = input.read(buffer)
             if (read < 0) break
-            digest.update(buffer, 0, read)
             output.write(buffer, 0, read)
             total += read
           }
         }
       }
-      val sha = hex(digest.digest())
+      check(total == identity.getLong("bytes")) { "APK asset copy incomplete: $name" }
       val dest = blob(sha)
       if (dest.exists()) dest.delete()
       if (!tmp.renameTo(dest)) throw IllegalStateException("无法保存 $name")
-      sha to total
-    } catch (error: java.io.FileNotFoundException) {
-      Log.i(TAG, "no asset $name")
-      null
-    }
+      return sha to total
+    } finally { tmp.delete() }
   }
 
   private fun rollbackAfterUnconfirmedBoot() {
@@ -358,13 +316,6 @@ class ReleaseStore(private val context: Context) {
     val shas = mutableSetOf<String>()
     doc.optJSONObject("vendor")?.optString("sha256")?.let { if (it.isNotEmpty()) shas += it }
     doc.optJSONObject("app")?.optString("sha256")?.let { if (it.isNotEmpty()) shas += it }
-    val plugins = doc.optJSONArray("plugins")
-    if (plugins != null) {
-      for (index in 0 until plugins.length()) {
-        val sha = plugins.getJSONObject(index).optString("sha256")
-        if (sha.isNotEmpty()) shas += sha
-      }
-    }
     return shas
   }
 
@@ -386,20 +337,10 @@ class ReleaseStore(private val context: Context) {
   private fun sameContent(left: JSONObject, right: JSONObject): Boolean {
     if (shaOf(left, "vendor") != shaOf(right, "vendor")) return false
     if (shaOf(left, "app") != shaOf(right, "app")) return false
-    return pluginKeys(left) == pluginKeys(right)
+    return true
   }
 
   private fun shaOf(doc: JSONObject, name: String): String = doc.optJSONObject(name)?.optString("sha256").orEmpty()
-
-  private fun pluginKeys(doc: JSONObject): Set<String> {
-    val keys = mutableSetOf<String>()
-    val plugins = doc.optJSONArray("plugins") ?: return keys
-    for (index in 0 until plugins.length()) {
-      val plugin = plugins.getJSONObject(index)
-      keys += "${plugin.optString("id")}:${plugin.optString("sha256")}"
-    }
-    return keys
-  }
 
   private fun validate(release: JSONObject) {
     if (release.optInt("format") != FORMAT) throw IllegalArgumentException("配套格式不认识")
@@ -413,17 +354,6 @@ class ReleaseStore(private val context: Context) {
     val app = release.optJSONObject("app") ?: throw IllegalArgumentException("配套缺少 app")
     requireBlob(app)
     if (app.optString("vendorMap") != vendor.optString("map")) throw IllegalArgumentException("app 和 vendor 编号对不上")
-    val plugins = release.optJSONArray("plugins") ?: throw IllegalArgumentException("配套缺少插件清单")
-    for (index in 0 until plugins.length()) {
-      val plugin = plugins.optJSONObject(index) ?: throw IllegalArgumentException("配套插件不对")
-      requireBlob(plugin)
-      val pluginId = plugin.optString("id")
-      if (!pluginId.matches(Regex("[a-z0-9-]+"))) throw IllegalArgumentException("配套插件编号不对")
-      if (plugin.optString("dex") != "$pluginId.dex") throw IllegalArgumentException("配套插件文件不对")
-      if (plugin.optString("className").isEmpty() || plugin.optString("className").length > 300) {
-        throw IllegalArgumentException("配套插件缺少类名")
-      }
-    }
   }
 
   private fun requireBlob(item: JSONObject) {
@@ -561,7 +491,6 @@ class ReleaseStore(private val context: Context) {
     return info.lastUpdateTime.toString()
   }
 
-  private fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
 
   private fun httpGet(url: String): String {
     val connection = URL(url).openConnection() as HttpURLConnection

@@ -1,10 +1,9 @@
-package com.zijinhua.app.plugin
+package com.zijinhua.app.host
 
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.facebook.react.uimanager.ViewManager
 import com.facebook.react.bridge.ReactContext
 import com.zijinhua.app.MainApplication
 import com.zijinhua.app.bundle.BundleInventory
@@ -18,8 +17,8 @@ import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
-object PluginCenter {
-  private const val TAG = "PluginCenter"
+object NativeServices {
+  private const val TAG = "NativeServices"
   private val io = Executors.newSingleThreadExecutor()
   private val downloads = Executors.newFixedThreadPool(3)
   private var appContext: Context? = null
@@ -41,71 +40,19 @@ object PluginCenter {
     Handler(Looper.getMainLooper()).post { callback(loading) }
   }
 
-  val registry: MapPluginRegistry = MapPluginRegistry()
-  private val nativeViews = mutableListOf<ViewManager<*, *>>()
-  private val viewsLock = Any()
-  private var viewsBound = false
+  val registry = NativeMethods()
 
   fun install(context: Context) {
     appContext = context.applicationContext
-    reload()
-  }
-
-  fun reload() {
-    val context = appContext ?: return
-    registry.clear()
-    registerBuiltins(context)
-    val loaded = DexPluginLoader(context).loadInto(registry, host(context), ReleaseStore(context).plugins())
-    acceptNativeViews(loaded.views)
-    Log.i(TAG, "plugins ready builtin=shell loaded=${loaded.count} methods=${registry.methodCount()} views=${loaded.views.size}")
-  }
-
-  fun nativeViewManagers(): List<ViewManager<*, *>> {
-    synchronized(viewsLock) {
-      viewsBound = true
-      return nativeViews.toList()
-    }
-  }
-
-  private fun acceptNativeViews(found: List<ViewManager<*, *>>) {
-    val accepted = mutableListOf<ViewManager<*, *>>()
-    val names = mutableSetOf("JollyVideoView")
-    for (manager in found) {
-      val name = try {
-        manager.name
-      } catch (error: Exception) {
-        Log.e(TAG, "native view name failed", error)
-        continue
-      }
-      if (name.isBlank() || !names.add(name)) {
-        Log.e(TAG, "skip native view name=$name")
-        continue
-      }
-      accepted.add(manager)
-    }
-    synchronized(viewsLock) {
-      nativeViews.clear()
-      nativeViews.addAll(accepted)
-      if (viewsBound) {
-        Log.i(TAG, "native views updated count=${accepted.size}; they apply on next cold start")
-      } else {
-        Log.i(TAG, "native views ready count=${accepted.size}")
-      }
-    }
-  }
-
-  fun syncPlugins(): String {
-    // Plugins are installed at boot and replaced explicitly on promotion.
-    // Retain the old bridge entry without reloading the same DEX classes.
-    Log.i(TAG, "plugins stay with the installed release")
-    return JSONObject().put("ok", true).put("written", 0).toString()
+    registerBuiltins(context.applicationContext)
+    Log.i(TAG, "services ready methods=${registry.methodCount()}")
   }
 
   fun prepareApplicationAsync(payload: String, complete: (String) -> Unit, fail: (Exception) -> Unit, isCurrent: () -> Boolean = { true }) {
     downloads.execute {
       if (!isCurrent()) return@execute
       try {
-        val context = appContext ?: throw IllegalStateException("plugin center not installed")
+        val context = appContext ?: throw IllegalStateException("native services not installed")
         ApplicationStore(context).prepare(JSONObject(payload))
         complete(JSONObject().put("ok", true).toString())
       } catch (error: Exception) { fail(error) }
@@ -113,7 +60,7 @@ object PluginCenter {
   }
 
   fun loadApplication(payload: String, expectedContext: ReactContext? = null, isCurrent: () -> Boolean = { true }): String {
-    val context = appContext ?: throw IllegalStateException("plugin center not installed")
+    val context = appContext ?: throw IllegalStateException("native services not installed")
     val host = (context.applicationContext as MainApplication).reactHost
     val target = expectedContext ?: host.currentReactContext ?: throw IllegalStateException("react context missing")
     check(isCurrent() && host.currentReactContext === target) { "react context changed" }
@@ -124,27 +71,19 @@ object PluginCenter {
   }
 
   private fun registerBuiltins(context: Context) {
-    registry.register("shell", "ping", PluginHandler { _ ->
+    registry.register("shell", "ping", NativeHandler { _ ->
       """{"ok":true,"host":"1.0"}"""
     })
-    registry.register("shell", "reloadPlugins", PluginHandler { _ ->
-      reload()
-      """{"ok":true,"methods":${registry.methodCount()}}"""
-    })
-    registry.register("shell", "syncPlugins", PluginHandler { _ ->
-      Log.i(TAG, "sync plugins")
-      syncPlugins()
-    })
-    registry.register("shell", "packages", PluginHandler { _ ->
+    registry.register("shell", "packages", NativeHandler { _ ->
       BundleInventory(context).toJson()
     })
-    registry.register("shell", "bundleReady", PluginHandler { _ ->
+    registry.register("shell", "bundleReady", NativeHandler { _ ->
       setBundleLoading(false)
       ReleaseStore(context).markHealthy()
       (context.applicationContext as MainApplication).onShellReady()
       """{"ok":true}"""
     })
-    registry.register("shell", "loadApp", PluginHandler { _ ->
+    registry.register("shell", "loadApp", NativeHandler { _ ->
       try {
         loadApp()
       } catch (error: Exception) {
@@ -152,37 +91,37 @@ object PluginCenter {
         throw error
       }
     })
-    registry.register("shell", "loadApplication", PluginHandler { payload ->
+    registry.register("shell", "loadApplication", NativeHandler { payload ->
       loadApplication(payload)
     })
-    registry.register("shell", "applicationSeed", PluginHandler { payload ->
-      val context = appContext ?: throw IllegalStateException("plugin center not installed")
+    registry.register("shell", "applicationSeed", NativeHandler { payload ->
+      val context = appContext ?: throw IllegalStateException("native services not installed")
       JSONObject().put("manifest", ApplicationStore(context).seed(JSONObject(payload).getString("appId"))).toString()
     })
-    registry.register("shell", "prepareApplication", PluginHandler { payload ->
-      val context = appContext ?: throw IllegalStateException("plugin center not installed")
+    registry.register("shell", "prepareApplication", NativeHandler { payload ->
+      val context = appContext ?: throw IllegalStateException("native services not installed")
       val manifest = JSONObject(payload)
       ApplicationStore(context).prepare(manifest)
       JSONObject().put("ok", true).toString()
     })
-    registry.register("shell", "cancelApplicationPreparation", PluginHandler { payload ->
-      val context = appContext ?: throw IllegalStateException("plugin center not installed")
+    registry.register("shell", "cancelApplicationPreparation", NativeHandler { payload ->
+      val context = appContext ?: throw IllegalStateException("native services not installed")
       val input = JSONObject(payload)
       ApplicationStore(context).cancelPreparation(input.getString("appId"), input.getString("releaseId"))
       JSONObject().put("ok", true).toString()
     })
-    registry.register("shell", "reloadApplications", PluginHandler { _ ->
-      val context = appContext ?: throw IllegalStateException("plugin center not installed")
+    registry.register("shell", "reloadApplications", NativeHandler { _ ->
+      val context = appContext ?: throw IllegalStateException("native services not installed")
       appContextId = 0
       setBundleLoading(true)
       (context.applicationContext as MainApplication).reactHost.reload("application-update")
       JSONObject().put("ok", true).toString()
     })
-    registry.register("shell", "checkUpdates", PluginHandler { _ ->
+    registry.register("shell", "checkUpdates", NativeHandler { _ ->
       Log.i(TAG, "check updates")
       checkUpdates()
     })
-    registry.register("shell", "applyUpdates", PluginHandler { _ ->
+    registry.register("shell", "applyUpdates", NativeHandler { _ ->
       Log.i(TAG, "apply staged updates")
       applyStagedUpdates()
     })
@@ -198,7 +137,7 @@ object PluginCenter {
   }
 
   private fun checkOnIo(): String {
-    val context = appContext ?: throw IllegalStateException("plugin center not installed")
+    val context = appContext ?: throw IllegalStateException("native services not installed")
     try {
       ReleaseStore(context).stage()
     } catch (error: Exception) {
@@ -216,11 +155,10 @@ object PluginCenter {
   }
 
   private fun applyStagedUpdates(): String {
-    val context = appContext ?: throw IllegalStateException("plugin center not installed")
+    val context = appContext ?: throw IllegalStateException("native services not installed")
     val applied = if (ReleaseStore(context).promoteIfReady()) 1 else 0
     Log.i(TAG, "staged updates applied=$applied")
     if (applied == 0) return JSONObject().put("ok", true).put("applied", 0).toString()
-    reload()
     appContextId = 0
     setBundleLoading(true)
     (context.applicationContext as MainApplication).reactHost.reload("package-update")
@@ -229,7 +167,7 @@ object PluginCenter {
 
   /** vendor 已经作为主包在运行，这里把 app 包加载进来。同一个 React 上下文只加载一次。 */
   fun loadApp(expectedContext: ReactContext? = null, isCurrent: () -> Boolean = { true }): String {
-    val context = appContext ?: throw IllegalStateException("plugin center not installed")
+    val context = appContext ?: throw IllegalStateException("native services not installed")
     val host = (context.applicationContext as MainApplication).reactHost
     val reactContext = host.currentReactContext ?: throw IllegalStateException("react context missing")
     check(isCurrent() && (expectedContext == null || expectedContext === reactContext)) { "react context changed" }
@@ -244,10 +182,4 @@ object PluginCenter {
     appContextId = identity
     return """{"ok":true,"loaded":true}"""
   }
-  private fun host(context: Context): BridgeHost {
-    return object : BridgeHost {
-      override fun getContext(): Context = context
-    }
-  }
-
 }

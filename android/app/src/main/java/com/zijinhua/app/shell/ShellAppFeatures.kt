@@ -118,7 +118,8 @@ object ShellAppFeatures {
     val appId = app(input)
     val file = File(input.getString("path")).canonicalFile
     val root = File(context().filesDir, "applications/$appId").canonicalFile
-    require(file.path.startsWith(root.path + File.separator) && file.isFile)
+    val packageRoot = File(context().filesDir, "application-bundles/$appId").canonicalFile
+    require((file.path.startsWith(root.path + File.separator) || file.path.startsWith(packageRoot.path + File.separator)) && file.isFile)
     return file
   }
 

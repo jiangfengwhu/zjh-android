@@ -2,7 +2,7 @@ package com.zijinhua.app.shell
 
 import android.content.Context
 import android.util.Log
-import com.zijinhua.app.plugin.PluginRegistry
+import com.zijinhua.app.host.NativeMethods
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -38,7 +38,7 @@ object ShellAi {
   var immersive: Boolean = false
     private set
 
-  fun register(registry: PluginRegistry, context: Context) {
+  fun register(registry: NativeMethods, context: Context) {
     val app = context.applicationContext
     restore(app)
     registry.register("shell", "appearance") { payload -> appearance(app, JSONObject(payload.ifBlank { "{}" })).toString() }
@@ -217,8 +217,8 @@ object ShellAi {
     val chosen = provider ?: return failure("NOT_CONFIGURED", "请先在我的页面配置 AI 引擎")
     if (!secureEndpoint(chosen.optString("baseUrl"))) return failure("INVALID_REQUEST", "请将 AI 引擎地址改为 HTTPS，且不要在地址中填写密钥")
     val streaming = input.optBoolean("stream")
-    // RN owns the protocol and modality validation. Keep the old envelope for older host bundles.
-    val body = if (input.has("body")) input.optJSONObject("body") else legacyBody(input, chosen.optString("model"))
+    // RN owns request assembly and modality validation.
+    val body = input.optJSONObject("body")
     if (body == null || body.length() == 0) return failure("INVALID_REQUEST", "AI 请求内容无效")
     val bytes = body.toString().toByteArray(Charsets.UTF_8)
     if (bytes.size > 12 * 1024 * 1024) return failure("INVALID_REQUEST", "AI 请求内容过大")
@@ -274,16 +274,6 @@ object ShellAi {
   }
 
   private fun failure(code: String, message: String) = JSONObject().put("ok", false).put("code", code).put("error", message)
-
-  /** Compatibility for envelopes sent by host bundles predating RN request assembly. */
-  private fun legacyBody(input: JSONObject, defaultModel: String): JSONObject? {
-    val messages = input.optJSONArray("messages") ?: return null
-    val body = JSONObject().put("model", input.optString("model").ifBlank { defaultModel })
-      .put("messages", messages).put("stream", input.optBoolean("stream"))
-    if (input.has("temperature")) body.put("temperature", input.get("temperature"))
-    if (input.has("maxTokens")) body.put("max_tokens", input.get("maxTokens"))
-    return body
-  }
 
   private fun secureEndpoint(baseUrl: String): Boolean = try {
     val url = URL(baseUrl)

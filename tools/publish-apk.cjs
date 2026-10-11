@@ -3,6 +3,7 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 const { runtimeVersion } = require("./runtime-version.cjs");
+const { buildApk } = require("./build-apk.cjs");
 async function main() {
   const root = path.resolve(__dirname, "..");
   const git = args => execFileSync("git", args, { cwd: root, encoding: "utf8", windowsHide: true }).trim();
@@ -14,9 +15,7 @@ async function main() {
   if (!beforeResponse.ok && beforeResponse.status !== 404) throw new Error("无法核对线上 APK 版本，已停止发布");
   const before = beforeResponse.ok ? await beforeResponse.json() : null;
   if (before && before.versionCode >= code.versionCode) throw new Error("新 APK versionCode 必须大于线上版本");
-  execFileSync(process.execPath, [path.join(root, "tools/prepare-apk.cjs")], { cwd: root, stdio: "inherit", windowsHide: true });
-  const gradle = process.platform === "win32" ? "gradlew.bat" : "./gradlew";
-  execFileSync(gradle, [":app:assembleRelease"], { cwd: path.join(root, "android"), stdio: "inherit", shell: process.platform === "win32", windowsHide: true });
+  await buildApk(root, { reuseOnly: process.argv.includes("--skip-build") });
   if (git(["status", "--porcelain"]) || git(["rev-parse", "HEAD"]) !== commit) throw new Error("构建期间源码发生改变，已停止发布");
   const directory = path.join(root, "android/app/build/outputs/apk/release");
   const metadata = JSON.parse(await fs.readFile(path.join(directory, "output-metadata.json"), "utf8"));

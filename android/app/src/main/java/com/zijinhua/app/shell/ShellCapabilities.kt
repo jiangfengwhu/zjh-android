@@ -8,7 +8,7 @@ import android.os.Build
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.core.content.FileProvider
-import com.zijinhua.app.plugin.PluginRegistry
+import com.zijinhua.app.host.NativeMethods
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -34,7 +34,7 @@ object ShellCapabilities {
 
   internal fun hostContext() = appContext()
 
-  fun register(registry: PluginRegistry) {
+  fun register(registry: NativeMethods) {
     registry.register("shell", "consumeLaunchLink") { payload ->
       val url = JSONObject(payload).optString("url")
       val host = activity ?: throw IllegalStateException("shell activity missing")

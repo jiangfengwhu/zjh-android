@@ -32,7 +32,7 @@ import com.facebook.react.interfaces.fabric.ReactSurface
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 import com.facebook.react.modules.core.PermissionAwareActivity
 import com.facebook.react.modules.core.PermissionListener
-import com.zijinhua.app.plugin.PluginCenter
+import com.zijinhua.app.host.NativeServices
 import com.zijinhua.app.shell.ShellAi
 import com.zijinhua.app.shell.ShellCapabilities
 
@@ -116,8 +116,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
       navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
     )
     initializeSystemBars()
-    PluginCenter.onBundleLoading = bundleLoadingListener
-    PluginCenter.onStartupFailure = startupFailureListener
+    NativeServices.onBundleLoading = bundleLoadingListener
+    NativeServices.onStartupFailure = startupFailureListener
     ShellAi.onSurfaceChanged = surfaceChangedListener
     applySystemBars()
     ShellCapabilities.attach(this)
@@ -172,7 +172,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
           // Keep React below any startup failure overlay shown during preparation.
           root.addView(view, 0, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
           created.start()
-          if (PluginCenter.startupFailed) showStartupFailure()
+          if (NativeServices.startupFailed) showStartupFailure()
           Log.i(TAG, "react surface started component=$mainComponentName")
         } catch (failure: Exception) {
           Log.e(TAG, "react surface failed", failure)
@@ -223,8 +223,8 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   override fun onDestroy() {
     loadingHandler.removeCallbacks(revealLoading)
     loadingHandler.removeCallbacks(startupTimeout)
-    if (PluginCenter.onBundleLoading === bundleLoadingListener) PluginCenter.onBundleLoading = null
-    if (PluginCenter.onStartupFailure === startupFailureListener) PluginCenter.onStartupFailure = null
+    if (NativeServices.onBundleLoading === bundleLoadingListener) NativeServices.onBundleLoading = null
+    if (NativeServices.onStartupFailure === startupFailureListener) NativeServices.onStartupFailure = null
     if (ShellAi.onSurfaceChanged === surfaceChangedListener) ShellAi.onSurfaceChanged = null
     if (surface != null) {
       surface?.stop()
@@ -273,7 +273,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         text = "重试加载"
         setOnClickListener {
           startupFailurePanel?.visibility = View.GONE
-          PluginCenter.setBundleLoading(true)
+          NativeServices.setBundleLoading(true)
           loadingHandler.postDelayed(startupTimeout, STARTUP_TIMEOUT_MS)
           if (surface == null) {
             (application as MainApplication).retryReactPreparation()
