@@ -5,6 +5,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.facebook.react.uimanager.ViewManager
+import com.facebook.react.bridge.ReactContext
 import com.zijinhua.app.MainApplication
 import com.zijinhua.app.bundle.BundleInventory
 import com.zijinhua.app.bundle.ReleaseStore
@@ -100,14 +101,26 @@ object PluginCenter {
     return JSONObject().put("ok", true).put("written", 0).toString()
   }
 
-  fun prepareApplicationAsync(payload: String, complete: (String) -> Unit, fail: (Exception) -> Unit) {
+  fun prepareApplicationAsync(payload: String, complete: (String) -> Unit, fail: (Exception) -> Unit, isCurrent: () -> Boolean = { true }) {
     downloads.execute {
+      if (!isCurrent()) return@execute
       try {
         val context = appContext ?: throw IllegalStateException("plugin center not installed")
         ApplicationStore(context).prepare(JSONObject(payload))
         complete(JSONObject().put("ok", true).toString())
       } catch (error: Exception) { fail(error) }
     }
+  }
+
+  fun loadApplication(payload: String, expectedContext: ReactContext? = null, isCurrent: () -> Boolean = { true }): String {
+    val context = appContext ?: throw IllegalStateException("plugin center not installed")
+    val host = (context.applicationContext as MainApplication).reactHost
+    val target = expectedContext ?: host.currentReactContext ?: throw IllegalStateException("react context missing")
+    check(isCurrent() && host.currentReactContext === target) { "react context changed" }
+    val manifest = JSONObject(payload)
+    val prepared = ApplicationStore(context).prepare(manifest)
+    SplitBundle.load(host, prepared.file.absolutePath, target, isCurrent)
+    return JSONObject().put("ok", true).put("assets", JSONObject(prepared.assets)).put("releaseId", manifest.getString("releaseId")).toString()
   }
 
   private fun registerBuiltins(context: Context) {
@@ -140,11 +153,7 @@ object PluginCenter {
       }
     })
     registry.register("shell", "loadApplication", PluginHandler { payload ->
-      val context = appContext ?: throw IllegalStateException("plugin center not installed")
-      val manifest = JSONObject(payload)
-      val prepared = ApplicationStore(context).prepare(manifest)
-      SplitBundle.load((context.applicationContext as MainApplication).reactHost, prepared.file.absolutePath)
-      JSONObject().put("ok", true).put("assets", JSONObject(prepared.assets)).put("releaseId", manifest.getString("releaseId")).toString()
+      loadApplication(payload)
     })
     registry.register("shell", "applicationSeed", PluginHandler { payload ->
       val context = appContext ?: throw IllegalStateException("plugin center not installed")
@@ -219,10 +228,11 @@ object PluginCenter {
   }
 
   /** vendor 已经作为主包在运行，这里把 app 包加载进来。同一个 React 上下文只加载一次。 */
-  private fun loadApp(): String {
+  fun loadApp(expectedContext: ReactContext? = null, isCurrent: () -> Boolean = { true }): String {
     val context = appContext ?: throw IllegalStateException("plugin center not installed")
     val host = (context.applicationContext as MainApplication).reactHost
     val reactContext = host.currentReactContext ?: throw IllegalStateException("react context missing")
+    check(isCurrent() && (expectedContext == null || expectedContext === reactContext)) { "react context changed" }
     val identity = System.identityHashCode(reactContext)
     if (appContextId == identity) {
       Log.i(TAG, "app already loaded")
@@ -230,7 +240,7 @@ object PluginCenter {
     }
     val file = ReleaseStore(context).appFile()
     Log.i(TAG, "load app bytes=${file.length()}")
-    SplitBundle.load(host, file.absolutePath)
+    SplitBundle.load(host, file.absolutePath, reactContext, isCurrent)
     appContextId = identity
     return """{"ok":true,"loaded":true}"""
   }

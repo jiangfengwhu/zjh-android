@@ -27,7 +27,7 @@ import kotlin.coroutines.resumeWithException
 
 /** Callback waits suspend coroutines; provider and file IO have separate bounded pools. */
 object ShellOperations {
-  val methods = setOf("operationCancel", "operationStopApp", "operationSuspendApp", "location", "pick", "exportFile", "share", "fileCommit",
+  val methods = setOf("operationCancel", "operationStopApp", "operationSuspendApp", "location", "pick", "exportFile", "share", "fileCommit", "fileReadTextChunk",
     "device", "torch", "openUrl", "calendarEvents", "calendarInsert", "calendarRemove",
     "healthStatus", "healthPermissions", "requestHealth", "healthSummary",
     "bluetoothState", "bluetoothDevices", "bluetoothScan", "nfcStatus", "nfcRead")
@@ -49,8 +49,9 @@ object ShellOperations {
     tasks.values.filter { it.method in setOf("location", "bluetoothScan", "nfcRead") }.forEach { it.job.cancel() }
     torches.keys.toList().forEach { stopTorch(it) }
   } }
-  fun call(context: Context, method: String, input: JSONObject, reply: (JSONObject) -> Unit) {
+  fun call(context: Context, method: String, input: JSONObject, reply: (JSONObject) -> Unit, isCurrent: () -> Boolean = { true }) {
     main.post {
+      if (!isCurrent()) return@post
       try {
         application = context.applicationContext
         val appId = input.getString("appId").also { require(it.matches(Regex("[a-z][a-z0-9-]{0,63}"))) }
@@ -71,6 +72,7 @@ object ShellOperations {
             withTimeout(timeout) {
               when (method) {
                 "location" -> location(context, input)
+                "fileReadTextChunk" -> provider { _, alive -> ShellTextFiles.read(context, input, alive) }
                 "fileCommit" -> provider { _, alive ->
                   val root = java.io.File(context.filesDir, "applications/$appId").canonicalFile
                   val target = java.io.File(input.getString("path")).canonicalFile

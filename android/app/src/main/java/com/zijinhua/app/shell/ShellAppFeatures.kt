@@ -62,7 +62,8 @@ object ShellAppFeatures {
   private fun app(input: JSONObject): String = input.getString("appId").also { require(it.matches(Regex("[a-z][a-z0-9-]{0,63}"))) }
   private fun id(input: JSONObject) = input.getString("requestId").also { require(it.matches(Regex("[A-Za-z0-9._:-]{1,160}"))) }
 
-  fun call(method: String, input: JSONObject, emit: (JSONObject) -> Unit, reply: (JSONObject) -> Unit) {
+  fun call(method: String, input: JSONObject, emit: (JSONObject) -> Unit, reply: (JSONObject) -> Unit, isCurrent: () -> Boolean = { true }) {
+    if (!isCurrent()) return
     if (method == "saveToGallery") {
       try { reply(saveToGallery(input)) } catch (_: Exception) { reply(result("file")) }
       return
@@ -71,6 +72,7 @@ object ShellAppFeatures {
       try { shortcutIcon(input) } catch (_: Exception) { reply(result("file")); return }
     } else null
     main.post {
+      if (!isCurrent()) return@post
       try {
         val appId = app(input)
         when (method) {

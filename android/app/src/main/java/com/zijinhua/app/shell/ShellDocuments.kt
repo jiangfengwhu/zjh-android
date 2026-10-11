@@ -47,8 +47,9 @@ object ShellDocuments {
       require(it.path.startsWith(root.path + File.separator) && (!exists || it.isFile))
     }
   }
-  fun call(context: Context, method: String, input: JSONObject, reply: (JSONObject) -> Unit) {
+  fun call(context: Context, method: String, input: JSONObject, reply: (JSONObject) -> Unit, isCurrent: () -> Boolean = { true }) {
     main.post {
+      if (!isCurrent()) return@post
       try {
         if (method == "documentStopApp") { stopApp(input.getString("appId")); reply(result()); return@post }
         val key = "${input.getString("appId")}:${input.getString("requestId")}".also { require(it.length <= 225) }
