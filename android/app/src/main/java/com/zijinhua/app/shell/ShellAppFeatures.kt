@@ -332,7 +332,7 @@ object ShellAppFeatures {
 
   private fun recognize(input: JSONObject, appId: String, emit: (JSONObject) -> Unit, reply: (JSONObject) -> Unit) {
     if (recognizing != null) { reply(result("busy")); return }
-    if (ContextCompat.checkSelfPermission(context(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reply(result("permission")); return }
+    if (ContextCompat.checkSelfPermission(context(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reply(result("microphone-permission")); return }
     val onDevice = input.optBoolean("onDevice")
     if (onDevice && (Build.VERSION.SDK_INT < 31 || !SpeechRecognizer.isOnDeviceRecognitionAvailable(context())) || !onDevice && !SpeechRecognizer.isRecognitionAvailable(context())) { reply(result("unsupported")); return }
     val language = input.optString("language", "zh-CN").also { require(it.length <= 40) }
@@ -358,7 +358,7 @@ object ShellAppFeatures {
       override fun onBufferReceived(buffer: ByteArray?) = Unit
       override fun onEndOfSpeech() { state("processing") }
       override fun onError(error: Int) { finish(result(when (error) {
-        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "permission"
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "speech-permission"
         SpeechRecognizer.ERROR_NO_MATCH -> "no-match"
         SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "timeout"
         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network"
