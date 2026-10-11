@@ -30,24 +30,28 @@ object ShellOperations {
   val methods = setOf("operationCancel", "operationStopApp", "operationSuspendApp", "location", "pick", "exportFile", "share", "fileCommit", "fileReadTextChunk",
     "device", "torch", "openUrl", "calendarEvents", "calendarInsert", "calendarRemove",
     "healthStatus", "healthPermissions", "requestHealth", "healthSummary",
-    "bluetoothState", "bluetoothDevices", "bluetoothScan", "nfcStatus", "nfcRead")
+    "bluetoothState", "bluetoothDevices", "bluetoothScan", "bluetoothConnect", "bluetoothDisconnect", "bluetoothServices", "bluetoothRead", "bluetoothWrite", "bluetoothSubscribe", "bluetoothUnsubscribe", "nfcStatus", "nfcRead", "nfcWrite",
+    "fileStat", "fileListPage", "fileCopy", "fileMove", "fileAppendText")
   private val main = Handler(Looper.getMainLooper())
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private val providerExecutor = Executors.newFixedThreadPool(2)
   internal val providerIo = providerExecutor.asCoroutineDispatcher()
   private val cancelling = Executors.newSingleThreadExecutor()
+  private val fileExecutor = Executors.newFixedThreadPool(2)
+  private val interactive = setOf("location", "bluetoothScan", "bluetoothConnect", "bluetoothServices", "bluetoothRead", "bluetoothWrite", "bluetoothSubscribe", "nfcRead", "nfcWrite", "torch", "openUrl", "pick", "exportFile", "share", "calendarInsert", "calendarRemove", "requestHealth")
   private data class Task(val appId: String, val method: String, val host: Activity?, val job: Job)
   private val tasks = mutableMapOf<String, Task>() // main looper
   private val torches = mutableMapOf<String, String>()
   private var application: Context? = null
   internal fun result(error: String? = null) = JSONObject().put("ok", error == null).apply { if (error != null) put("error", error) }
-  private fun cancelApp(appId: String) { tasks.values.filter { it.appId == appId }.toList().forEach { it.job.cancel() }; stopTorch(appId) }
+  private fun cancelApp(appId: String) { tasks.values.filter { it.appId == appId }.toList().forEach { it.job.cancel() }; stopTorch(appId); ShellBluetooth.stopApp(appId) }
   fun stopApp(appId: String) { main.post { cancelApp(appId) } }
-  fun stopAll() { main.post { tasks.values.toList().forEach { it.job.cancel() }; torches.keys.toList().forEach { stopTorch(it) } } }
+  fun stopAll() { main.post { tasks.values.toList().forEach { it.job.cancel() }; torches.keys.toList().forEach { stopTorch(it) }; ShellBluetooth.stopAll() } }
   fun stopActivity(activity: Activity) { main.post { tasks.values.filter { it.host === activity }.forEach { it.job.cancel() }; torches.keys.toList().forEach { stopTorch(it) } } }
   fun pauseInteractive() { main.post {
-    tasks.values.filter { it.method in setOf("location", "bluetoothScan", "nfcRead") }.forEach { it.job.cancel() }
+    tasks.values.filter { it.method in interactive && it.method !in setOf("pick", "exportFile", "requestHealth") }.forEach { it.job.cancel() }
     torches.keys.toList().forEach { stopTorch(it) }
+    ShellBluetooth.stopAll()
   } }
   fun call(context: Context, method: String, input: JSONObject, reply: (JSONObject) -> Unit, isCurrent: () -> Boolean = { true }) {
     main.post {
@@ -56,13 +60,14 @@ object ShellOperations {
         application = context.applicationContext
         val appId = input.getString("appId").also { require(it.matches(Regex("[a-z][a-z0-9-]{0,63}"))) }
         if (method == "operationSuspendApp") {
-          tasks.values.filter { it.appId == appId && it.method in setOf("location", "bluetoothScan", "nfcRead") }.forEach { it.job.cancel() }
-          stopTorch(appId); reply(result()); return@post
+          tasks.values.filter { it.appId == appId && it.method in interactive && it.method !in setOf("pick", "exportFile", "requestHealth") }.forEach { it.job.cancel() }
+          stopTorch(appId); ShellBluetooth.stopApp(appId); reply(result()); return@post
         }
         if (method == "operationStopApp") { cancelApp(appId); reply(result()); return@post }
         val requestId = input.getString("requestId").also { require(it.matches(Regex("[A-Za-z0-9._:-]{1,160}"))) }
         val key = "$appId:$requestId"
         if (method == "operationCancel") { tasks[key]?.job?.cancel(); reply(result()); return@post }
+        if (method in interactive && !(method == "torch" && !input.optBoolean("on")) && !ShellVisibility.active(appId)) { reply(result("cancel")); return@post }
         if (tasks.size >= 24 || tasks.values.count { it.appId == appId } >= 6 || tasks.containsKey(key)) { reply(result("busy")); return@post }
         val host = ShellCapabilities.hostActivity()
         val job = scope.launch(start = CoroutineStart.LAZY) {
@@ -73,15 +78,9 @@ object ShellOperations {
               when (method) {
                 "location" -> location(context, input)
                 "fileReadTextChunk" -> provider { _, alive -> ShellTextFiles.read(context, input, alive) }
+                "fileStat", "fileListPage", "fileCopy", "fileMove", "fileAppendText" -> provider(fileExecutor) { _, alive -> ShellAppFiles.call(context, method, input, alive) }
                 "fileCommit" -> provider { _, alive ->
-                  val root = java.io.File(context.filesDir, "applications/$appId").canonicalFile
-                  val target = java.io.File(input.getString("path")).canonicalFile
-                  val source = java.io.File(input.getString("temporary")).canonicalFile
-                  require(target.path.startsWith(root.path + java.io.File.separator))
-                  require(source.parentFile == target.parentFile && source != target && source.isFile)
-                  check(alive())
-                  android.system.Os.rename(source.path, target.path)
-                  result()
+                  ShellAppFiles.commit(context, input, alive)
                 }
                 "pick" -> ShellFileTransfers.importFile(context, input)
                 "exportFile" -> ShellFileTransfers.export(context, input)
@@ -93,8 +92,10 @@ object ShellOperations {
                 "bluetoothState" -> ShellBluetooth.state(context)
                 "bluetoothDevices" -> ShellBluetooth.devices(context)
                 "bluetoothScan" -> ShellBluetooth.scan(context, input)
+                "bluetoothConnect", "bluetoothDisconnect", "bluetoothServices", "bluetoothRead", "bluetoothWrite", "bluetoothSubscribe", "bluetoothUnsubscribe" -> ShellBluetooth.gatt(context, method, input)
                 "nfcStatus" -> ShellNfc.status(context)
                 "nfcRead" -> ShellNfc.read(context, input)
+                "nfcWrite" -> ShellNfc.write(context, input)
                 "device" -> device(context)
                 "torch" -> torch(context, input, appId)
                 "openUrl" -> { requireNotNull(host).startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(input.getString("url")))); result() }
@@ -107,7 +108,10 @@ object ShellOperations {
           } catch (_: TimeoutCancellationException) { result("timeout") }
             catch (_: CancellationException) { result("cancel") }
             catch (_: SecurityException) { result("permission") }
-            catch (_: Exception) { result("unavailable") }
+            catch (_: java.nio.file.NoSuchFileException) { result("not-found") }
+            catch (_: java.io.FileNotFoundException) { result("not-found") }
+            catch (_: java.nio.file.FileAlreadyExistsException) { result("exists") }
+            catch (error: Exception) { result(if (error.message in setOf("too-large", "read-only", "exists", "not-found")) error.message else "unavailable") }
           tasks.remove(key)
           reply(value)
         }
@@ -115,9 +119,9 @@ object ShellOperations {
       } catch (_: Exception) { reply(result("unavailable")) }
     }
   }
-  private suspend fun <T> provider(block: (CancellationSignal, () -> Boolean) -> T): T = suspendCancellableCoroutine { continuation ->
+  private suspend fun <T> provider(executor: java.util.concurrent.ExecutorService = providerExecutor, block: (CancellationSignal, () -> Boolean) -> T): T = suspendCancellableCoroutine { continuation ->
     val signal = CancellationSignal()
-    val future = providerExecutor.submit {
+    val future = executor.submit {
       try {
         if (continuation.isActive) {
           val value = block(signal) { continuation.isActive }
@@ -126,7 +130,7 @@ object ShellOperations {
       } catch (error: Exception) { if (continuation.isActive) continuation.resumeWithException(error) }
     }
     continuation.invokeOnCancellation {
-      future.cancel(true); (providerExecutor as java.util.concurrent.ThreadPoolExecutor).remove(future as Runnable)
+      future.cancel(true); (executor as java.util.concurrent.ThreadPoolExecutor).remove(future as Runnable)
       cancelling.execute { signal.cancel() }
     }
   }

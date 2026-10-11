@@ -61,7 +61,7 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
     }, 1500)
   }
 
-  override val reactHost: ReactHost by lazy {
+  private val host = lazy {
     val bundlePath = if (ReactBuildConfig.DEBUG) {
       Log.i(TAG, "debug uses Metro, skip active bundle file")
       null
@@ -79,6 +79,8 @@ class MainApplication : Application(), ReactApplication, Configuration.Provider 
       jsBundleFilePath = bundlePath,
     )
   }
+  override val reactHost: ReactHost by host
+  internal fun existingReactContext() = if (host.isInitialized()) host.value.currentReactContext else null
 
   override fun onCreate() {
     super.onCreate()

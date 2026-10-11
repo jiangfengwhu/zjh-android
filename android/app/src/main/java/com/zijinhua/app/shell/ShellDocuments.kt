@@ -54,6 +54,7 @@ object ShellDocuments {
         if (method == "documentStopApp") { stopApp(input.getString("appId")); reply(result()); return@post }
         val key = "${input.getString("appId")}:${input.getString("requestId")}".also { require(it.length <= 225) }
         if (method == "documentCancel") { tasks[key]?.invoke(); reply(result()); return@post }
+        if (method == "documentPrint" && !ShellVisibility.active(input.getString("appId"))) { reply(result("cancel")); return@post }
         if (tasks.size >= 3 || tasks.containsKey(key)) { reply(result("busy")); return@post }
         when (method) {
           "documentRecognize" -> recognize(context, input, key, reply)

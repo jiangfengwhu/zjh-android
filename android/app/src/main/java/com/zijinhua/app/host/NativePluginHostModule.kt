@@ -49,6 +49,7 @@ class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePlug
     ShellAppFeatures.stopAll()
     ShellDocuments.stopAll()
     ShellOperations.stopAll()
+    com.zijinhua.app.shell.ShellVisibility.clear()
     super.invalidate()
   }
   override fun call(pluginId: String, method: String, payload: String, promise: Promise) {
@@ -76,6 +77,8 @@ class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePlug
                 putString("appId", value.optString("appId")); putString("requestId", value.optString("requestId"))
                 putString("kind", value.optString("kind"))
                 if (value.has("text")) putString("text", value.getString("text"))
+                if (value.has("state")) putString("state", value.getString("state"))
+                if (value.has("level")) putDouble("level", value.getDouble("level"))
                 if (value.has("sensor")) {
                   putString("sensor", value.getString("sensor")); putDouble("timestampMs", value.getDouble("timestampMs")); putInt("accuracy", value.getInt("accuracy"))
                   putArray("values", Arguments.createArray().apply { val values = value.getJSONArray("values"); for (index in 0 until values.length()) pushDouble(values.getDouble(index)) })

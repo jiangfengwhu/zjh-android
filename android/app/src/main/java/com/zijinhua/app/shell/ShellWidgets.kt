@@ -29,6 +29,7 @@ object ShellWidgets {
   private fun result(error: String? = null) = JSONObject().put("ok", error == null).apply { if (error != null) put("error", error) }
   @Synchronized fun call(context: Context, method: String, input: JSONObject): JSONObject {
     val appId = input.getString("appId").also { require(it.matches(Regex("[a-z][a-z0-9-]{0,63}"))) }
+    if (method == "widgetPin" && !ShellVisibility.active(appId)) return result("cancel")
     val manager = AppWidgetManager.getInstance(context)
     if (method == "widgetStatus") return result().put("supported", manager.isRequestPinAppWidgetSupported)
     val data = root(context)

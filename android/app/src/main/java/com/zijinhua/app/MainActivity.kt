@@ -106,6 +106,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     supportFragmentManager.fragmentFactory = RNScreensFragmentFactory()
     super.onCreate(savedInstanceState)
     com.zijinhua.app.shell.ShellAlarms.capture(applicationContext, intent)
+    com.zijinhua.app.shell.ShellIncomingShares.capture(applicationContext, intent)
     splash.setKeepOnScreenCondition { !::root.isInitialized }
     splash.setOnExitAnimationListener { screen ->
       screen.remove()
@@ -190,6 +191,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
   override fun onNewIntent(intent: Intent) {
     super.onNewIntent(intent)
+    com.zijinhua.app.shell.ShellIncomingShares.capture(applicationContext, intent)
     com.zijinhua.app.shell.ShellAlarms.capture(applicationContext, intent)
     setIntent(intent)
     if (surface != null) reactHost.onNewIntent(intent)
@@ -203,6 +205,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
   override fun onResume() {
     super.onResume()
+    com.zijinhua.app.shell.ShellVisibility.foreground = true
     com.zijinhua.app.shell.ShellFileTransfers.onResume(this)
     com.zijinhua.app.shell.ShellHealth.onResume(this)
     applySystemBars()
@@ -212,6 +215,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
   }
 
   override fun onPause() {
+    com.zijinhua.app.shell.ShellVisibility.foreground = false
     com.zijinhua.app.shell.ShellAppFeatures.stopAll(includeBiometric = false)
     com.zijinhua.app.shell.ShellOperations.pauseInteractive()
     if (surface != null) {

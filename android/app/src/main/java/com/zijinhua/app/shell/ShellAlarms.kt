@@ -94,6 +94,10 @@ object ShellAlarms {
   fun schedule(context: Context, id: String, title: String, body: String, atMs: Long, options: JSONObject = JSONObject()): JSONObject {
     val safeId = requireId(id)
     validate(options)
+    require(title.length <= 200 && body.length <= 2000)
+    val entries = read(context)
+    val prefix = safeId.substringBefore(":") + ":"
+    if (entries.none { it.getString("id") == safeId } && (entries.size >= 2048 || entries.count { it.getString("id").startsWith(prefix) } >= 128)) return JSONObject().put("ok", false).put("error", "busy")
     ensureChannel(context, safeId.substringBefore(":").takeIf { safeId.contains(":") }, options.optString("appName").takeIf { it.isNotBlank() })
     val trigger = options.optJSONObject("repeat")?.let { nextTime(it, System.currentTimeMillis()) } ?: atMs.coerceAtLeast(System.currentTimeMillis() + 500L)
     persist(context, safeId, title, body, trigger, options)
@@ -109,15 +113,11 @@ object ShellAlarms {
   @Synchronized
   fun cancel(context: Context, id: String): JSONObject {
     val safeId = requireId(id)
-    val alarmManager = context.getSystemService(AlarmManager::class.java)
-    for (entry in read(context).filter { it.optJSONObject("options")?.optString("parentId") == safeId }) cancel(context, entry.getString("id"))
-    val pending = pending(context, safeId, "", "")
-    alarmManager?.cancel(pending)
-    pending.cancel()
-    val left = read(context).filter { it.getString("id") != safeId }
-    write(context, left)
-    NotificationManagerCompat.from(context).cancel(notificationId(safeId))
-    NotificationManagerCompat.from(context).cancel(safeId, 0)
+    val entries = read(context)
+    val ids = mutableSetOf(safeId)
+    entries.filter { it.optJSONObject("options")?.optString("parentId") == safeId }.forEach { ids.add(it.getString("id")) }
+    cancelIds(context, ids)
+    write(context, entries.filter { it.getString("id") !in ids })
     Log.i(TAG, "cancelled id=$safeId")
     return JSONObject().put("ok", true).put("id", safeId)
   }
@@ -126,17 +126,29 @@ object ShellAlarms {
   fun cancelAll(context: Context, appId: String): JSONObject {
     require(appId.matches(Regex("[a-z][a-z0-9-]{0,63}")))
     val prefix = "$appId:"
-    read(context).filter { it.getString("id").startsWith(prefix) }.forEach { cancel(context, it.getString("id")) }
+    val entries = read(context)
+    cancelIds(context, entries.filter { it.getString("id").startsWith(prefix) }.map { it.getString("id") }.toSet())
+    write(context, entries.filterNot { it.getString("id").startsWith(prefix) })
     val manager = context.getSystemService(NotificationManager::class.java)
     manager?.activeNotifications?.filter { it.tag?.startsWith(prefix) == true }?.forEach { manager.cancel(it.tag, it.id) }
     saveEvents(context, events(context).filter { it.optString("appId") != appId })
     return JSONObject().put("ok", true)
   }
 
+  private fun cancelIds(context: Context, ids: Set<String>) {
+    val alarms = context.getSystemService(AlarmManager::class.java)
+    val notifications = NotificationManagerCompat.from(context)
+    ids.forEach { id ->
+      val pending = pending(context, id, "", ""); alarms?.cancel(pending); pending.cancel()
+      notifications.cancel(id, 0)
+    }
+  }
+
   @Synchronized
-  fun list(context: Context): JSONObject {
+  fun list(context: Context, appId: String): JSONObject {
+    require(appId.matches(Regex("[a-z][a-z0-9-]{0,63}")))
     val items = JSONArray()
-    read(context).forEach { items.put(it) }
+    read(context).filter { it.getString("id").startsWith("$appId:") }.forEach { items.put(it) }
     return JSONObject().put("ok", true).put("items", items)
   }
 
@@ -249,7 +261,7 @@ object ShellAlarms {
       val parent = options.optString("parentId", id)
       options.put("parentId", parent).put("sourceId", parent.substringAfter(":"))
       val snoozeId = parent.substringBefore(":") + ":" + UUID.randomUUID().toString().replace("-", "").take(14)
-      schedule(context, snoozeId, entry.optString("title"), entry.optString("body"), System.currentTimeMillis() + action.optLong("snoozeMs", 600000), options)
+      if (!schedule(context, snoozeId, entry.optString("title"), entry.optString("body"), System.currentTimeMillis() + action.optLong("snoozeMs", 600000), options).optBoolean("ok")) return
       NotificationManagerCompat.from(context).cancel(id, 0)
     }
     saveEvents(context, events(context).takeLast(63) + event)

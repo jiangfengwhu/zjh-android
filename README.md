@@ -58,6 +58,10 @@ UI 与纯 JS 的 SDK API 变化走 dynamic 发布，不因 SDK 大版本变化�
 
 本地通知由 ShellAlarms 使用 AlarmManager 与 NotificationManager 实现，不引入通知第三方运行时。通知点击沿用 MainActivity 和宿主深链启动流程，不自行启动 ReactHost；事件先持久化，应用订阅后处理并确认。原生操作按钮可直接延后或取消提醒，日历重复规则在重启、系统时间与时区变化后重新计算；待触发提醒和事件按应用隔离，卸载时清理。作品通知按 appId 使用独立系统渠道，保留用户的声音、振动与开关设置；渠道名称来自宿主应用元数据，后台旧提醒不覆盖更新后的名称。状态查询同时检查宿主授权和应用渠道，设置入口定位对应渠道。公共接口与限制只维护在 SDK README。
 
+交互能力由 SDK 可见状态及 MainActivity 前台状态共同约束，预加载作品不能弹起系统界面。BLE GATT按应用隔离连接、串行执行同一连接的读写，离开作品或切后台断开；NFC读写共享单个前台会话。传感器回调在独立HandlerThread按采样间隔发送，停止订阅后忽略迟到事件。语音查询拥有独立取消与超时，长文本按设备限制分段朗读；不依赖后台ReactHost。
+
+系统分享接收使用两路IO复制临时content授权中的文件，并持久化待处理队列；用户选定作品后，在同一文件系统重命名至作品目录。转移意图先持久化，重启按目录状态完成或撤销转移；确认只移除事件，不删除作品文件。文件复制、追加和目录分页使用独立两路IO池，固定数量的路径锁协调提交，复制和追加在取消检查后替换目标；账号切换取消SDK文件任务与OCR。公共接口仅在SDK README维护，原生不向云端应用Agent公开宿主入口。
+
 RN 由 AppCompatActivity 的 FrameLayout 直接承载 ReactSurface。宿主根布局完成且导航就绪后调用 bundleReady，确认包启动健康并释放原生启动图；这不代表首页数据加载完成或屏幕已经绘制。随后延迟 1.5 秒，在后台注册 WorkManager 更新任务、恢复提醒和执行常规旧包清理。后台任务可通过 Configuration.Provider 按需初始化 WorkManager。
 
 Release 首次界面请求 whenReactReady 时，Application 启动 ShellStartup 后台任务（每进程一次）；通知接收器和 WorkManager 单独唤醒进程时不启动 RN：执行 prepareBoot，恢复 APK 内置包、处理失败回退、激活已暂存更新并准备固定 vendor 路径，再注册内置原生服务。后台准备磁盘包并注册服务，同时由主线程初始化 RN 原生库；两边完成后才启动 ReactHost 并创建 ReactSurface，避免提前捕获旧 vendor 路径。首次安装或 APK 升级直接使用 prepare:apk 写入 release-seed.json 的包身份复制内置包，不在手机上计算文件哈希，客户端不再计算或比对下载文件的 SHA-256，激活暂存更新只检查文件存在且非空；常规回收统一在 bundleReady 后延迟执行。重载后的 bundleReady 也触发回收，服务注册与提醒恢复每进程只执行一次。

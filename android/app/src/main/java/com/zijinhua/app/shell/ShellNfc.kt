@@ -16,6 +16,7 @@ object ShellNfc {
   private val main = Handler(Looper.getMainLooper())
   private var active: Any? = null
   private var reading = false // main looper
+  private val closing = java.util.concurrent.Executors.newSingleThreadExecutor()
   fun status(context: Context): JSONObject {
     val adapter = NfcAdapter.getDefaultAdapter(context)
     return ShellOperations.result().put("present", adapter != null).put("enabled", adapter?.isEnabled == true)
@@ -39,6 +40,60 @@ object ShellNfc {
             main.post { close(); if (continuation.isActive) continuation.resume(value) }
           }, NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or NfcAdapter.FLAG_READER_NFC_F or NfcAdapter.FLAG_READER_NFC_V, null)
         } catch (_: Exception) { closed.set(true); close(); if (continuation.isActive) continuation.resume(ShellOperations.result("unavailable")) }
+      }
+    } finally { runCatching { adapter.disableReaderMode(host) }; if (active === session) active = null; reading = false }
+  }
+  /** Writes a single NDEF message after the user touches a tag; never makes a tag read-only. */
+  suspend fun write(context: Context, input: JSONObject): JSONObject {
+    if (reading) return ShellOperations.result("busy")
+    val list = input.getJSONArray("records").also { require(it.length() in 1..64) }
+    val records = (0 until list.length()).map { index ->
+      val record = list.getJSONObject(index)
+      when (record.getString("type")) {
+        "text" -> NdefRecord.createTextRecord(record.optString("language", "zh"), record.getString("text"))
+        "uri" -> NdefRecord.createUri(record.getString("uri").also { require(it.length <= 8192 && android.net.Uri.parse(it).scheme != null) })
+        else -> error("unsupported")
+      }
+    }.toTypedArray()
+    val message = android.nfc.NdefMessage(records)
+    if (message.byteArrayLength > 65536) return ShellOperations.result("too-large")
+    val host = ShellCapabilities.hostActivity() ?: return ShellOperations.result("unavailable")
+    val adapter = NfcAdapter.getDefaultAdapter(context) ?: return ShellOperations.result("unsupported")
+    if (!adapter.isEnabled) return ShellOperations.result("disabled")
+    val session = Any(); active = session; reading = true
+    val tagConnection = java.util.concurrent.atomic.AtomicReference<android.nfc.tech.Ndef?>()
+    try {
+      return suspendCancellableCoroutine { continuation ->
+        val closed = AtomicBoolean(false)
+        fun closeReader() { if (active === session) runCatching { adapter.disableReaderMode(host) } }
+        continuation.invokeOnCancellation {
+          closed.set(true); main.post { closeReader() }
+          closing.execute { runCatching { tagConnection.get()?.close() } }
+        }
+        try {
+          adapter.enableReaderMode(host, { tag ->
+            if (!closed.compareAndSet(false, true)) return@enableReaderMode
+            val value = try {
+              val ndef = android.nfc.tech.Ndef.get(tag)
+              if (ndef == null) ShellOperations.result("unsupported") else {
+                tagConnection.set(ndef)
+                try {
+                  if (!continuation.isActive) ShellOperations.result("cancel") else {
+                    ndef.connect()
+                    when {
+                      !ndef.isWritable -> ShellOperations.result("read-only")
+                      message.byteArrayLength > ndef.maxSize -> ShellOperations.result("too-large")
+                      !continuation.isActive -> ShellOperations.result("cancel")
+                      else -> { ndef.writeNdefMessage(message); ShellOperations.result().put("id", tag.id.joinToString("") { "%02x".format(it) }) }
+                    }
+                  }
+                } finally { runCatching { ndef.close() }; tagConnection.set(null) }
+              }
+            } catch (_: android.nfc.TagLostException) { ShellOperations.result("tag-lost") }
+              catch (_: Exception) { ShellOperations.result("unavailable") }
+            main.post { closeReader(); if (continuation.isActive) continuation.resume(value) }
+          }, NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or NfcAdapter.FLAG_READER_NFC_F or NfcAdapter.FLAG_READER_NFC_V, null)
+        } catch (_: Exception) { closeReader(); if (continuation.isActive) continuation.resume(ShellOperations.result("unavailable")) }
       }
     } finally { runCatching { adapter.disableReaderMode(host) }; if (active === session) active = null; reading = false }
   }

@@ -35,6 +35,9 @@ object ShellCapabilities {
   internal fun hostContext() = appContext()
 
   fun register(registry: NativeMethods) {
+    listOf("incomingSharePending", "incomingShareAccept", "incomingShareDiscard", "incomingShareList", "incomingShareAcknowledge", "incomingShareRemoveApp").forEach { method ->
+      registry.register("shell", method) { payload -> ShellIncomingShares.call(appContext(), method, JSONObject(payload)).toString() }
+    }
     registry.register("shell", "consumeLaunchLink") { payload ->
       val url = JSONObject(payload).optString("url")
       val host = activity ?: throw IllegalStateException("shell activity missing")
@@ -53,8 +56,8 @@ object ShellCapabilities {
     }
     registry.register("shell", "notificationSettings") { payload ->
       val input = JSONObject(payload)
-      ShellAlarms.settings(appContext(), input.optBoolean("exact"), input.getString("appId"), input.optString("appName"))
-      JSONObject().put("ok", true).toString()
+      if (!ShellVisibility.active(input.getString("appId"))) JSONObject().put("ok", false).put("error", "cancel").toString()
+      else { ShellAlarms.settings(appContext(), input.optBoolean("exact"), input.getString("appId"), input.optString("appName")); JSONObject().put("ok", true).toString() }
     }
     registry.register("shell", "notificationEvents") { payload ->
       val input = JSONObject(payload)
@@ -63,7 +66,7 @@ object ShellCapabilities {
     registry.register("shell", "notify") { payload -> notify(JSONObject(payload)).toString() }
     registry.register("shell", "schedule") { payload -> schedule(JSONObject(payload)).toString() }
     registry.register("shell", "cancelSchedule") { payload -> cancelSchedule(JSONObject(payload)).toString() }
-    registry.register("shell", "schedules") { _ -> schedules().toString() }
+    registry.register("shell", "schedules") { payload -> ShellAlarms.list(appContext(), JSONObject(payload).getString("appId")).toString() }
     registry.register("shell", "installPackage") { payload -> installPackage(JSONObject(payload)).toString() }
   }
 
@@ -74,6 +77,7 @@ object ShellCapabilities {
     val methods = JSONArray()
     listOf(
       "capabilities", "notify", "schedule", "cancelSchedule", "notificationStatus", "notificationSettings", "notificationEvents", "cancelAllSchedules",
+      "incomingSharePending", "incomingShareAccept", "incomingShareDiscard", "incomingShareList", "incomingShareAcknowledge", "incomingShareRemoveApp",
       "schedules", "share",
       "installPackage",
       "device", "calendarEvents", "calendarInsert", "openUrl",
@@ -111,7 +115,6 @@ object ShellCapabilities {
     return ShellAlarms.cancel(appContext(), input.getString("id"))
   }
 
-  private fun schedules(): JSONObject = ShellAlarms.list(appContext())
 
   private fun installPackage(input: JSONObject): JSONObject {
     val host = activity ?: throw IllegalStateException("shell activity missing")
