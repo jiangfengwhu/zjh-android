@@ -56,9 +56,9 @@ class ReleaseStore(private val context: Context) {
       val pending = File(root, "boot.pending")
       if (pending.isFile) {
         Log.i(TAG, "previous boot was not confirmed, rolling back without blocking retry")
-        // 旧版标记为 boot；新版标记绑定版本，切换中断时不误伤仍在运行的旧版本。
+        // Only roll back the release whose startup was interrupted.
         val trial = pending.readText().trim()
-        if (trial == "boot" || trial == readPointer("current")) rollbackAfterUnconfirmedBoot()
+        if (trial == readPointer("current")) rollbackAfterUnconfirmedBoot()
         pending.delete()
       }
       try {
@@ -68,7 +68,8 @@ class ReleaseStore(private val context: Context) {
       }
       syncLive()
       root.mkdirs()
-      writeAtomic(pending, (readPointer("current") ?: "boot").toByteArray(Charsets.UTF_8))
+      val current = readPointer("current") ?: throw IllegalStateException("没有可用的宿主版本")
+      writeAtomic(pending, current.toByteArray(Charsets.UTF_8))
     }
   }
 

@@ -94,10 +94,6 @@ object NativeServices {
     registry.register("shell", "loadApplication", NativeHandler { payload ->
       loadApplication(payload)
     })
-    registry.register("shell", "applicationSeed", NativeHandler { payload ->
-      val context = appContext ?: throw IllegalStateException("native services not installed")
-      JSONObject().put("manifest", ApplicationStore(context).seed(JSONObject(payload).getString("appId"))).toString()
-    })
     registry.register("shell", "prepareApplication", NativeHandler { payload ->
       val context = appContext ?: throw IllegalStateException("native services not installed")
       val manifest = JSONObject(payload)

@@ -174,19 +174,7 @@ class ApplicationStore(private val context: Context) {
     val directory = File(root, appId).apply { mkdirs() }
     val file = File(directory, "$sha.bundle")
     if (complete(file, bytes)) return file
-    // Reuse existing immutable downloads when upgrading the APK. Business
-    // paths stay untouched; only this exact package filename is relocated.
-    val legacy = File(context.filesDir, "applications/$appId/$sha.bundle")
-    if (complete(legacy, bytes)) {
-      try { android.system.Os.rename(legacy.absolutePath, file.absolutePath); return file }
-      catch (_: android.system.ErrnoException) { /* Download again if relocation is unavailable. */ }
-    }
     val temporary = File(directory, "$sha.tmp")
-    try {
-      val seedPath = "applications/$appId/$sha.bundle"
-      context.assets.open(seedPath).use { input -> temporary.outputStream().use { input.copyTo(it) } }
-      if (complete(temporary, bytes) && temporary.renameTo(file)) return file
-    } catch (_: java.io.FileNotFoundException) { /* The application is not included in this APK seed. */ }
     temporary.delete()
     val connection = URL("https://zjh-cdn.297782.xyz/v1/app/$sha").openConnection() as HttpURLConnection
     connection.connectTimeout = 10000
@@ -221,12 +209,6 @@ class ApplicationStore(private val context: Context) {
       connection.disconnect()
       temporary.delete()
     }
-  }
-
-  fun seed(appId: String): JSONObject? {
-    require(Regex("^[a-z][a-z0-9-]{0,63}$").matches(appId)) { "invalid application identity" }
-    return try { context.assets.open("applications/$appId/manifest.json").bufferedReader().use { JSONObject(it.readText()) } }
-    catch (_: java.io.FileNotFoundException) { null }
   }
 
 

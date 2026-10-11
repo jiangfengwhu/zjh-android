@@ -1,4 +1,4 @@
-# 紫金花 Android 壳
+# 生花 Android 壳
 
 维护原生能力、Codegen 桥接、APK、运行时契约与依赖补丁。SDK/宿主在 zjh-dynamic，应用在 zjh-plugin，服务端在 zjh-server。维护边界见 [AGENTS.md](AGENTS.md)。
 
@@ -22,13 +22,13 @@ npm run build:apk
 
 Windows 构建音频原生依赖需要 Git Bash 及其 Unix 工具。若脚本提示找不到 mkdir/rm，需将 Git 安装目录的 usr/bin 和 mingw64/bin 加入当前构建进程 PATH，再运行 Gradle。
 
-prepare:apk 下载线上宿主 vendor/app，按包身份复用缓存并检查长度与运行时契约，不内置 plugin 应用。应用预热与打开按 appId/releaseId 共享内存中的准备任务和已完成路径（最多 32 组）；命中后只确认缓存文件仍存在，缺失时重新准备；完整缓存直接执行，不重复下载或校验内容。原生最多同时准备 3 个作品，每个作品以 2 路下载 bundle 和资源，全局资源池最多 6 路；可见页与后台任务的名额由 [宿主下载调度](https://github.com/jiangfengwhu/zjh-dynamic/blob/main/README.md) 分配。下载不等待手势或 JS 空闲，客户端不做公开版本联网验签或下载文件 SHA-256 比对。制作进度页及角色视频属于宿主，不包含应用 seed 别名。
+prepare:apk 下载线上宿主 vendor/app，按包身份复用缓存并检查长度与运行时契约，不内置 plugin 应用。应用预热与打开按 appId/releaseId 共享内存中的准备任务和已完成路径（最多 32 组）；命中后只确认缓存文件仍存在，缺失时重新准备；完整缓存直接执行，不重复下载或校验内容。原生最多同时准备 3 个作品，每个作品以 2 路下载 bundle 和资源，全局资源池最多 6 路；可见页与后台任务的名额由 [宿主下载调度](https://github.com/jiangfengwhu/zjh-dynamic/blob/main/README.md) 分配。下载不等待手势或 JS 空闲，客户端不做公开版本联网验签或下载文件 SHA-256 比对。制作进度页及角色视频属于宿主，视频从宿主媒体 CDN 加载，APK 不内置作品或重复角色视频。
 
 Release 开启 R8 代码与资源裁剪、内置 bundle 压缩。原生能力随 APK 编译，通过 Codegen 桥接提供给宿主；原生共享库保持直接加载，不以安装后额外解压换取下载体积。
 
 作品准备有 90 秒总时限；网络连接超时 10 秒、读取超时 15 秒，连续 15 秒不足 32 KiB 的传输由看门狗关闭。取消和失败关闭同任务的连接并停止其他资源 worker，已完整下载的文件保留；不做断点续传。桥接成功的 Promise 直接在工作线程 resolve，具体 UI 操作仍由其实现调度到主线程。
 
-作品资源使用固定 64 个分段锁，同一个 appId/资源哈希始终使用同一把锁，锁数量不随下载历史增长；不同资源映射到同一分段时串行执行。资源别名按 appId 缓存，包含不存在的别名文件，最多保留 32 组。
+作品资源使用固定 64 个分段锁，同一个 appId/资源哈希始终使用同一把锁，锁数量不随下载历史增长；不同资源映射到同一分段时串行执行。
 
 作品准备通过下载池异步回调完成，不占用桥接线程等待；取消、AI 请求、应用执行与通用调用分用线程池，应用执行仍串行。宿主更新的 vendor/app 使用两路下载池，流式写入临时文件；全部完成后才暂存清单。任一下载失败会关闭其他连接，并等待所有 worker 退出后允许重试，保留已完整下载的文件。
 
@@ -91,4 +91,4 @@ npm ci / npm install 的 postinstall 自动运行 patch-package。补丁改变�
 | react-native-screens 4.28.0 | 页面导航栏 trait 不再写窗口，由 MainActivity 初始化透明且可见的导航栏；不改变顶部状态栏、方向与键盘处理 |
 | react-native-vision-camera-barcode-scanner 5.2.3 | 首次创建图片扫码器或相机扫码输出时初始化 ML Kit；宿主 Manifest 移除自动初始化 Provider，R8 保留反射注册器的无参构造 |
 
-作品包与资源缓存位于 filesDir/application-bundles/<appId>，业务文件仍位于 filesDir/applications/<appId>。APK 升级按资源身份复用旧目录的完整包，不移动业务文件；图库导出、快捷方式与小组件允许读取同一应用的包资源，不授予写入包缓存的权限。本地通知接收器共用单线程执行队列，不按每次广播创建线程。
+作品包与资源缓存位于 filesDir/application-bundles/<appId>，业务文件仍位于 filesDir/applications/<appId>。应用包只从包缓存或 CDN 加载，不读取业务目录或 APK 作品 seed；图库导出、快捷方式与小组件允许读取同一应用的包资源，不授予写入包缓存的权限。本地通知接收器共用单线程执行队列，不按每次广播创建线程。

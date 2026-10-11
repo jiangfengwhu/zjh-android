@@ -48,7 +48,7 @@ object ShellAppFiles {
           Files.newDirectoryStream(source.toPath()).use { entries -> entries.forEach { entry ->
             check(alive())
             val name = entry.fileName.toString()
-            if (name > after && !(source == File(context.filesDir, "applications/${input.getString("appId")}").canonicalFile && input.optBoolean("device") && (name == "accounts" || name.matches(Regex("[a-f0-9]{64}\\.(bundle|tmp)"))))) {
+            if (name > after && !(source == File(context.filesDir, "applications/${input.getString("appId")}").canonicalFile && input.optBoolean("device") && name == "accounts")) {
               candidates.add(name); if (candidates.size > limit + 1) candidates.pollLast()
             }
           } }

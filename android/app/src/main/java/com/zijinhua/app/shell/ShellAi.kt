@@ -75,7 +75,7 @@ object ShellAi {
       return JSONObject().put("ok", false).put("error", "statusBar 需要 #RRGGBB")
     }
     if (input.has("light")) lightSurface = input.optBoolean("light")
-    // Legacy immersive controls status visibility only; navigation is globally visible and transparent.
+    // Immersive controls status visibility only; navigation stays visible and transparent.
     if (input.has("immersive")) immersive = input.optBoolean("immersive")
     statusBarColor = status
     navigationBarColor = navigation
