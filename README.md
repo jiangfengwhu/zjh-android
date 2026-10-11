@@ -22,7 +22,7 @@ npm run build:apk
 
 Windows 构建音频原生依赖需要 Git Bash 及其 Unix 工具。若脚本提示找不到 mkdir/rm，需将 Git 安装目录的 usr/bin 和 mingw64/bin 加入当前构建进程 PATH，再运行 Gradle。
 
-prepare:apk 下载线上宿主 vendor/app，按包身份复用缓存并检查长度与运行时契约，不内置 plugin 应用。应用预热与打开按 appId/releaseId 共享内存中的准备任务和已完成路径（最多 32 组）；命中后只确认缓存文件仍存在，缺失时重新准备；完整缓存直接执行，不重复下载或校验内容。原生最多同时准备 3 个作品，每个作品以 2 路下载 bundle 和资源，全局资源池最多 6 路；可见页与后台任务的名额由 [宿主下载调度](https://github.com/jiangfengwhu/zjh-dynamic/blob/main/README.md) 分配。下载不等待手势或 JS 空闲，客户端不做公开版本联网验签或下载文件 SHA-256 比对。Jolly 制作进度页及视频属于宿主；准备资源时清理旧 Jolly 应用 seed。
+prepare:apk 下载线上宿主 vendor/app，按包身份复用缓存并检查长度与运行时契约，不内置 plugin 应用。应用预热与打开按 appId/releaseId 共享内存中的准备任务和已完成路径（最多 32 组）；命中后只确认缓存文件仍存在，缺失时重新准备；完整缓存直接执行，不重复下载或校验内容。原生最多同时准备 3 个作品，每个作品以 2 路下载 bundle 和资源，全局资源池最多 6 路；可见页与后台任务的名额由 [宿主下载调度](https://github.com/jiangfengwhu/zjh-dynamic/blob/main/README.md) 分配。下载不等待手势或 JS 空闲，客户端不做公开版本联网验签或下载文件 SHA-256 比对。制作进度页及角色视频属于宿主，不包含应用 seed 别名。
 
 Release 开启 R8 代码与资源裁剪、内置 bundle 压缩。原生能力随 APK 编译，通过 Codegen 桥接提供给宿主；原生共享库保持直接加载，不以安装后额外解压换取下载体积。
 

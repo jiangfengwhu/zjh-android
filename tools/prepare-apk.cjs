@@ -64,9 +64,6 @@ async function main() {
   // Native cold boot copies these identities directly instead of hashing assets.
   await writeChanged(path.join(assets, 'release-seed.json'), Buffer.from(JSON.stringify({ vendor: release.vendor, app: release.app })));
   await writeChanged(path.join(assets, 'runtime-version.txt'), Buffer.from(release.runtimeVersion));
-  const obsoleteSeed = path.resolve(assets, 'applications', 'jolly');
-  if (path.relative(assets, obsoleteSeed) !== path.join('applications', 'jolly')) throw new Error('Invalid generated seed path');
-  await fs.rm(obsoleteSeed, { recursive: true, force: true });
   console.log(`APK seed ready: release=${release.id}`);
 }
 

@@ -28,7 +28,6 @@ class ApplicationStore(private val context: Context) {
     val resources = Executors.newFixedThreadPool(6)
     val preparing = ConcurrentHashMap<String, Preparation>()
     val prepared = LinkedHashMap<String, PreparedApplication>(32, 0.75f, true)
-    val assetAliases = LinkedHashMap<String, JSONObject>(32, 0.75f, true)
     val watchdogs = Executors.newSingleThreadScheduledExecutor()
   }
 
@@ -184,9 +183,7 @@ class ApplicationStore(private val context: Context) {
     }
     val temporary = File(directory, "$sha.tmp")
     try {
-      val aliases = aliases(appId)
-      val sharedAsset = aliases.optString(sha)
-      val seedPath = if (sharedAsset.matches(Regex("^jolly/[a-z0-9_]+\\.mp4$"))) sharedAsset else "applications/$appId/$sha.bundle"
+      val seedPath = "applications/$appId/$sha.bundle"
       context.assets.open(seedPath).use { input -> temporary.outputStream().use { input.copyTo(it) } }
       if (complete(temporary, bytes) && temporary.renameTo(file)) return file
     } catch (_: java.io.FileNotFoundException) { /* The application is not included in this APK seed. */ }
@@ -232,15 +229,6 @@ class ApplicationStore(private val context: Context) {
     catch (_: java.io.FileNotFoundException) { null }
   }
 
-  private fun aliases(appId: String): JSONObject = synchronized(assetAliases) {
-    assetAliases[appId]?.let { return it }
-    val value = try {
-      context.assets.open("applications/$appId/asset-aliases.json").bufferedReader().use { JSONObject(it.readText()) }
-    } catch (_: java.io.FileNotFoundException) { JSONObject() }
-    assetAliases[appId] = value
-    while (assetAliases.size > 32) assetAliases.remove(assetAliases.keys.first())
-    value
-  }
 
   private fun complete(file: File, bytes: Long): Boolean = file.isFile && file.length() == bytes
 }
