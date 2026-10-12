@@ -5,7 +5,7 @@ import java.io.Reader
 
 /** Bounded SSE decoder. UTF-8 decoding belongs to the Reader; events may span network chunks. */
 internal object AiTextStream {
-  fun read(reader: Reader, cancelled: () -> Boolean, emit: (String) -> Unit): String {
+  fun read(reader: Reader, cancelled: () -> Boolean, emit: (String) -> Unit, responses: Boolean = false): String {
     val text = StringBuilder()
     val line = StringBuilder()
     val data = StringBuilder()
@@ -18,9 +18,26 @@ internal object AiTextStream {
     fun event() {
       if (data.isEmpty()) return
       val value = data.toString(); data.setLength(0)
-      if (value == "[DONE]") { done = true; return }
+      if (value == "[DONE]") { require(!responses || finished) { "response interrupted" }; done = true; return }
       val json = JSONObject(value)
       require(!json.has("error")) { "stream error" }
+      if (responses) {
+        when (json.optString("type")) {
+          "response.failed", "response.incomplete", "error" -> error("response failed or incomplete")
+          "response.output_text.delta" -> {
+            val content = json.opt("delta") as? String ?: error("invalid response delta")
+            text.append(content); pending.append(content)
+            if (System.nanoTime() - lastEmit >= 40_000_000) flush()
+          }
+          "response.completed" -> {
+            val final = AiResponseText.read(json.getJSONObject("response"))
+            // Read through the terminal event; text deltas alone never mean success.
+            if (text.isEmpty()) { text.append(final); pending.append(final) }
+            finished = true; done = true
+          }
+        }
+        return
+      }
       val choice = json.optJSONArray("choices")?.optJSONObject(0) ?: return
       val reason = choice.optString("finish_reason")
       if (reason.isNotBlank() && reason != "null") {

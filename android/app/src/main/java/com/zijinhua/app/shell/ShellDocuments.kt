@@ -27,9 +27,9 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.io.MemoryUsageSetting
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 
-/** Offline OCR and printing of existing PDF files. */
+/** Offline document text, OCR and printing of existing PDF files. */
 object ShellDocuments {
-  val methods = setOf("documentRecognize", "documentPrint", "documentCancel", "documentStopApp")
+  val methods = setOf("documentExtractText", "documentRecognize", "documentPrint", "documentCancel", "documentStopApp")
   private val main = Handler(Looper.getMainLooper())
   private val io = Executors.newFixedThreadPool(2)
   private val tasks = mutableMapOf<String, () -> Unit>() // main looper only
@@ -57,10 +57,34 @@ object ShellDocuments {
         if (method == "documentPrint" && !ShellVisibility.active(input.getString("appId"))) { reply(result("cancel")); return@post }
         if (tasks.size >= 3 || tasks.containsKey(key)) { reply(result("busy")); return@post }
         when (method) {
+          "documentExtractText" -> extractText(context, input, key, reply)
           "documentRecognize" -> recognize(context, input, key, reply)
           "documentPrint" -> print(context, input, key, reply)
         }
       } catch (_: Exception) { reply(result("unavailable")) }
+    }
+  }
+  private fun extractText(context: Context, input: JSONObject, key: String, reply: (JSONObject) -> Unit) {
+    val cancelled = AtomicBoolean(false)
+    var replied = false
+    lateinit var timeout: Runnable
+    fun respond(value: JSONObject) {
+      if (replied) return
+      replied = true; main.removeCallbacks(timeout); reply(value)
+    }
+    timeout = Runnable { cancelled.set(true); respond(result("timeout")) }
+    tasks[key] = { cancelled.set(true); respond(result("cancel")) }
+    main.postDelayed(timeout, 30000)
+    io.execute {
+      val value = try {
+        ShellDocumentText.extract(context, file(context, input), input.optInt("maxChars", 100000), cancelled)
+      } catch (error: ShellDocumentText.Failure) { result(error.reason) }
+      catch (_: Exception) { result(if (cancelled.get()) "cancel" else "invalid-document") }
+      main.post {
+        // Keep the physical worker slot occupied after cancellation until parsing exits.
+        tasks.remove(key); main.removeCallbacks(timeout)
+        respond(value)
+      }
     }
   }
   private fun recognize(context: Context, input: JSONObject, key: String, reply: (JSONObject) -> Unit) {

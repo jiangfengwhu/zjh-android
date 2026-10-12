@@ -223,10 +223,13 @@ object ShellAi {
     val bytes = body.toString().toByteArray(Charsets.UTF_8)
     if (bytes.size > 12 * 1024 * 1024) return failure("INVALID_REQUEST", "AI 请求内容过大")
     val model = body.optString("model", chosen.optString("model"))
+    val protocol = input.optString("protocol", "chat-completions")
+    if (protocol != "chat-completions" && protocol != "responses") return failure("INVALID_REQUEST", "AI 请求协议无效")
     val path = if (input.has("path")) input.optString("path") else
       if (chosen.getString("baseUrl").trimEnd('/').endsWith("/chat/completions")) "" else "/chat/completions"
     if (!Regex("(/[A-Za-z0-9_-]+)*").matches(path)) return failure("INVALID_REQUEST", "AI 请求路径无效")
-    val endpoint = chosen.getString("baseUrl").trimEnd('/') + path
+    val base = chosen.getString("baseUrl").trimEnd('/')
+    val endpoint = (if (input.has("protocol")) base.removeSuffix("/chat/completions").removeSuffix("/responses") else base) + path
     var connection: HttpURLConnection? = null
     return try {
       val request = (URL(endpoint).openConnection() as HttpURLConnection).apply {
@@ -253,12 +256,13 @@ object ShellAi {
         }
       } else {
         val text = request.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-          if (streaming) return@use AiTextStream.read(reader, { state.cancelled.get() }, emit)
+          if (streaming) return@use AiTextStream.read(reader, { state.cancelled.get() }, emit, protocol == "responses")
           val result = StringBuilder(); val buffer = CharArray(8192)
           while (true) { if (state.cancelled.get()) return failure("CANCELLED", "已取消生成"); val size = reader.read(buffer); if (size < 0) break; result.append(buffer, 0, size); if (result.length > 2 * 1024 * 1024) return failure("INVALID_RESPONSE", "模型响应过大，请减少输出长度") }
           result.toString()
         }
-        val content = if (streaming) text else JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.opt("content") as? String
+        val content = if (streaming) text else if (protocol == "responses") AiResponseText.read(JSONObject(text))
+          else JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.opt("content") as? String
         if (content.isNullOrBlank()) failure("INVALID_RESPONSE", "模型未返回可用文本，请重试")
         else JSONObject().put("ok", true).put("text", content).put("providerId", chosen.getString("id")).put("model", model)
       }

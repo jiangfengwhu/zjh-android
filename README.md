@@ -32,7 +32,7 @@ Release 开启 R8 代码与资源裁剪、内置 bundle 压缩。原生能力随
 
 作品准备通过下载池异步回调完成，不占用桥接线程等待；取消、AI 请求、应用执行与通用调用分用线程池，应用执行仍串行。宿主更新的 vendor/app 使用两路下载池，流式写入临时文件；全部完成后才暂存清单。任一下载失败会关闭其他连接，并等待所有 worker 退出后允许重试，保留已完整下载的文件。
 
-AI 请求体及附件校验由 dynamic 的 RN 层维护。原生 complete 只在已配置引擎地址下发送 RN 提供的 body 和相对 path，注入保存的密钥，禁止重定向，并限制请求及响应大小、处理取消和超时。文本 SSE 仍在原生解码，约每 40ms 合并增量通知 RN；请求只接受 RN 组装的 body，不维护旧 messages 信封转换。新增请求参数不在 Kotlin 枚举，新增响应协议需协调解码器。
+AI 请求体及附件校验由 dynamic 的 RN 层维护。原生 complete 只在已配置引擎地址下发送 RN 提供的 body 和相对 path，注入保存的密钥，禁止重定向，并限制请求及响应大小、处理取消和超时。文本 SSE 仍在原生解码，约每 40ms 合并增量通知 RN；请求只接受 RN 组装的 body，不维护旧 messages 信封转换。新增请求参数不在 Kotlin 枚举，已支持 Chat Completions 与 Responses 的文本及 SSE 响应，新增响应协议需协调解码器。
 
 锁文件不变时复用依赖与 Gradle、CMake/Ninja、.cache/apk 缓存，不常规 clean；仍须检查运行时兼容与文件长度，不进行完整性哈希校验。
 
@@ -92,3 +92,5 @@ npm ci / npm install 的 postinstall 自动运行 patch-package。补丁改变�
 | react-native-vision-camera-barcode-scanner 5.2.3 | 首次创建图片扫码器或相机扫码输出时初始化 ML Kit；宿主 Manifest 移除自动初始化 Provider，R8 保留反射注册器的无参构造 |
 
 作品包与资源缓存位于 filesDir/application-bundles/<appId>，业务文件仍位于 filesDir/applications/<appId>。应用包只从包缓存或 CDN 加载，不读取业务目录或 APK 作品 seed；图库导出、快捷方式与小组件允许读取同一应用的包资源，不授予写入包缓存的权限。本地通知接收器共用单线程执行队列，不按每次广播创建线程。
+
+文档正文提取在现有两路文档 IO 池执行，PDF 复用 PDFBox，DOC 使用 Apache POI，DOCX 流式解析正文 XML；只将有上限的文字返回 RN。超时或取消先响应用户，解析退出后释放工作槽，不增加权限。公共接口与限制见 SDK README。

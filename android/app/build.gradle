@@ -148,6 +148,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.5")
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    implementation("org.apache.poi:poi-scratchpad:5.5.1")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
