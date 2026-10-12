@@ -341,7 +341,7 @@ object ShellAppFeatures {
     recognizing = task; recognizer = engine
     val timeout = Runnable { if (recognizing === task) stopRecognition("timeout") }
     task.timeout = timeout
-    main.postDelayed(timeout, 60_000)
+    main.postDelayed(timeout, 600_000)
     fun finish(value: JSONObject) {
       if (recognizing !== task) return
       recognizing = null; recognizer = null; runCatching { engine.destroy() }; complete(task, value)
@@ -374,6 +374,8 @@ object ShellAppFeatures {
     try { engine.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
       .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
       .putExtra(RecognizerIntent.EXTRA_LANGUAGE, language).putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+      .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 60_000)
+      .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 60_000)
       .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)) } catch (_: Exception) { finish(result("unavailable")) }
   }
   private fun stopRecognition(error: String = "cancel") {
