@@ -29,3 +29,10 @@
 # PDFBox references this optional codec only from its image decode/encode filters.
 -dontwarn com.gemalto.jp2.JP2Decoder
 -dontwarn com.gemalto.jp2.JP2Encoder
+
+# HWPF body-text extraction does not invoke POI's desktop drawing/debug writers.
+# Log4j's optional OSGi service discovery and build-time annotations are unused on Android.
+-dontwarn java.awt.**
+-dontwarn org.osgi.framework.**
+-dontwarn aQute.bnd.annotation.**
+-dontwarn edu.umd.cs.findbugs.annotations.**

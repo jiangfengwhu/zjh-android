@@ -80,6 +80,7 @@ object ShellDocuments {
         ShellDocumentText.extract(context, file(context, input), input.optInt("maxChars", 100000), cancelled)
       } catch (error: ShellDocumentText.Failure) { result(error.reason) }
       catch (_: Exception) { result(if (cancelled.get()) "cancel" else "invalid-document") }
+      catch (_: LinkageError) { result("invalid-document") }
       main.post {
         // Keep the physical worker slot occupied after cancellation until parsing exits.
         tasks.remove(key); main.removeCallbacks(timeout)
