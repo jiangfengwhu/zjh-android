@@ -19,6 +19,11 @@ import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -38,7 +43,7 @@ object ShellAsr {
   private var cached: OnlineRecognizer? = null
   private val releaseIdle = Runnable { inference.execute { if (current == null) { cached?.release(); cached = null } } }
   private class Failure(val code: String) : Exception(code)
-  private class Session(val appId: String, val id: String, val emit: (JSONObject) -> Unit, val reply: (JSONObject) -> Unit) {
+  private class Session(val appId: String, val id: String, val emit: (JSONObject) -> Unit, val reply: (JSONObject) -> Unit, val recording: File?) {
     val stop = AtomicBoolean(false)
     val cancelled = AtomicBoolean(false)
     val replied = AtomicBoolean(false)
@@ -62,7 +67,13 @@ object ShellAsr {
     if (language != "zh" && language != "en" && !language.startsWith("zh-") && !language.startsWith("en-")) { reply(result("language")); return }
     if (!available(context)) { reply(result("missing-data")); return }
     val id = input.getString("requestId").also { require(it.matches(Regex("[A-Za-z0-9._:-]{1,160}"))) }
-    val session = Session(appId, id, emit, reply)
+    val recording = input.optString("recordingFile").takeIf { it.isNotBlank() }?.let { uri ->
+      val root = File(context.filesDir, "applications/$appId").canonicalFile
+      File(android.net.Uri.parse(uri).path ?: "").canonicalFile.also {
+        require(uri.startsWith("file://") && it.path.startsWith(root.path + File.separator) && it.extension == "wav" && !it.exists())
+      }
+    }
+    val session = Session(appId, id, emit, reply, recording)
     current = session; main.removeCallbacks(releaseIdle)
     ShellAsrModels.changed(context)
     inference.execute { run(context.applicationContext, session) }
@@ -94,8 +105,11 @@ object ShellAsr {
     Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
     var stream: OnlineStream? = null
     var value = result("cancel")
+    var recording: WavCapture? = null
+    var saved = false
     try {
       if (session.cancelled.get()) return
+      recording = session.recording?.let { WavCapture(it) }
       // Begin capture immediately, retaining the first words during lazy model loading.
       if (!session.stop.get()) capture.execute { record(session) } else session.captureDone = true
       val engine = recognizer(context)
@@ -108,6 +122,7 @@ object ShellAsr {
         session.failure?.let { throw Failure(it) }
         val samples = session.audio.poll(50, TimeUnit.MILLISECONDS)
         if (samples != null) {
+          recording?.write(samples)
           stream.acceptWaveform(samples, RATE)
           while (engine.isReady(stream) && !session.cancelled.get()) engine.decode(stream)
           val text = engine.getResult(stream).text
@@ -129,6 +144,9 @@ object ShellAsr {
       if (text.length > 100000) throw Failure("too-large")
       event(session, "speech", "text", text)
       value = if (text.isBlank()) result("no-match") else result().put("text", text)
+      if (text.isNotBlank() && recording != null && !session.cancelled.get()) {
+        recording.finish(); saved = true; value.put("durationMs", recording.durationMs)
+      }
     } catch (error: Exception) {
       value = result(if (error is Failure) error.code else "asr-engine")
     } catch (_: LinkageError) {
@@ -137,13 +155,44 @@ object ShellAsr {
       session.stop.set(true)
       runCatching { stream?.release() }
       session.audio.clear()
+      recording?.close()
+      if (saved && session.cancelled.get()) session.recording?.delete()
       main.post {
         if (current === session) current = null
         ShellAsrModels.changed(context)
+        if (saved && session.cancelled.get()) session.recording?.delete()
         if (session.replied.compareAndSet(false, true)) session.reply(value)
         main.removeCallbacks(releaseIdle); main.postDelayed(releaseIdle, 60_000)
       }
     }
+  }
+  /** Writes on the inference worker, never on the microphone/UI thread; no full recording in memory. */
+  private class WavCapture(private val target: File) {
+    private val temporary: File
+    private val output: RandomAccessFile
+    private var bytes = 0L
+    private var closed = false
+    init {
+      check(target.parentFile!!.mkdirs() || target.parentFile!!.isDirectory)
+      temporary = File(target.parentFile, ".asr-${UUID.randomUUID()}.tmp")
+      output = RandomAccessFile(temporary, "rw"); output.write(ByteArray(44))
+    }
+    val durationMs get() = bytes * 1000 / (RATE * 2)
+    fun write(samples: FloatArray) {
+      if (bytes + samples.size * 2 > 100 * 1024 * 1024) throw Failure("too-large")
+      val pcm = ByteBuffer.allocate(samples.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+      samples.forEach { pcm.putShort((it * 32768).toInt().coerceIn(-32768, 32767).toShort()) }
+      output.write(pcm.array()); bytes += pcm.capacity()
+    }
+    fun finish() {
+      val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN)
+      header.put("RIFF".toByteArray()).putInt((bytes + 36).toInt()).put("WAVEfmt ".toByteArray())
+      header.putInt(16).putShort(1).putShort(1).putInt(RATE).putInt(RATE * 2).putShort(2).putShort(16)
+      header.put("data".toByteArray()).putInt(bytes.toInt())
+      output.seek(0); output.write(header.array()); output.close(); closed = true
+      java.nio.file.Files.move(temporary.toPath(), target.toPath())
+    }
+    fun close() { if (!closed) runCatching { output.close() }; temporary.delete() }
   }
   private fun record(session: Session) {
     Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)

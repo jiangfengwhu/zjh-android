@@ -85,7 +85,7 @@ object ShellAppFeatures {
           "removeApplicationShortcuts" -> { removeShortcuts(appId); reply(result()) }
           "calendarCompose" -> reply(calendar(input))
           "speechStatus" -> reply(result().put("recognition", true).put("modelReady", ShellAsr.available(context()))
-            .put("onDevice", true)
+            .put("onDevice", true).put("recording", true)
             .put("microphone", ContextCompat.checkSelfPermission(context(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
             .put("tts", context().packageManager.queryIntentServices(Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0).isNotEmpty()))
           "speechSpeak" -> speak(input, appId, emit, reply)
