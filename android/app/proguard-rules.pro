@@ -9,6 +9,9 @@
 
 # Add any project specific keep options here:
 
+# Sherpa JNI reads Kotlin configuration fields and constructs recognition results.
+-keep class com.k2fsa.sherpa.onnx.** { *; }
+
 # Room instantiates generated databases by name and a no-argument constructor.
 -keep class * extends androidx.room.RoomDatabase { *; }
 # Scheduled workers can outlive the APK that originally saved their class names.

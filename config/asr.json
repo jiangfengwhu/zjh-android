@@ -1,0 +1,12 @@
+{
+  "sherpaVersion": "1.13.8",
+  "aarBytes": 50129134,
+  "model": "sherpa-onnx-x-asr-480ms-streaming-zipformer-transducer-zh-en-punct-int8-2026-06-05",
+  "archiveBytes": 133895136,
+  "files": {
+    "encoder.int8.onnx": 155278641,
+    "decoder.onnx": 11309084,
+    "joiner.int8.onnx": 2581422,
+    "tokens.txt": 58806
+  }
+}

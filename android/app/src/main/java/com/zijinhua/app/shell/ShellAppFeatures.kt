@@ -23,9 +23,6 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.CalendarContract
 import android.provider.MediaStore
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import androidx.core.content.ContextCompat
@@ -50,12 +47,9 @@ object ShellAppFeatures {
   private var tts: TextToSpeech? = null
   private var ttsReady = false
   private var speaking: Task? = null
-  private var recognizer: SpeechRecognizer? = null
-  private var recognizing: Task? = null
   private var biometric: Task? = null
   private var biometricCancel: CancellationSignal? = null
   private val voiceTasks = mutableMapOf<String, Pair<Task, TextToSpeech>>()
-  private val languageTasks = mutableMapOf<String, Pair<Task, SpeechRecognizer>>()
   private val awake = mutableSetOf<String>()
   private fun updateAwake() { ShellCapabilities.hostActivity()?.window?.let { window -> if (awake.isEmpty()) window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) } }
   private abstract class ActiveSensor : SensorEventListener { val active = java.util.concurrent.atomic.AtomicBoolean(true) }
@@ -90,19 +84,19 @@ object ShellAppFeatures {
           "shortcutRemove" -> { removeShortcut(appId, input.getString("id")); reply(result()) }
           "removeApplicationShortcuts" -> { removeShortcuts(appId); reply(result()) }
           "calendarCompose" -> reply(calendar(input))
-          "speechStatus" -> reply(result().put("recognition", SpeechRecognizer.isRecognitionAvailable(context()))
-            .put("onDevice", Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context()))
+          "speechStatus" -> reply(result().put("recognition", ShellAsr.available(context()))
+            .put("onDevice", ShellAsr.available(context()))
             .put("microphone", ContextCompat.checkSelfPermission(context(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
             .put("tts", context().packageManager.queryIntentServices(Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0).isNotEmpty()))
           "speechSpeak" -> speak(input, appId, emit, reply)
           "speechVoices" -> voices(input, appId, reply)
-          "speechLanguages" -> languages(input, appId, reply)
+          "speechLanguages" -> reply(ShellAsr.languages())
           "speechQueryCancel" -> { cancelSpeechQueries(appId, id(input)); reply(result()) }
           "speechStop" -> { if (!input.has("requestId") || speaking?.id == id(input)) stopSpeech(appId); reply(result()) }
-          "speechRecognize" -> recognize(input, appId, emit, reply)
-          "speechFinish" -> { if (recognizing?.appId == appId) recognizer?.stopListening(); reply(result()) }
-          "speechCancelAll" -> { if (recognizing?.appId == appId) stopRecognition(); reply(result()) }
-          "speechCancel" -> { if (recognizing?.appId == appId && recognizing?.id == id(input)) stopRecognition(); reply(result()) }
+          "speechRecognize" -> ShellAsr.recognize(context(), input, appId, emit, reply)
+          "speechFinish" -> { ShellAsr.finish(appId); reply(result()) }
+          "speechCancelAll" -> { ShellAsr.cancel(appId); reply(result()) }
+          "speechCancel" -> { ShellAsr.cancel(appId, id(input)); reply(result()) }
           "sensorStatus" -> { val manager = context().getSystemService(SensorManager::class.java); reply(result().put("items", JSONArray(sensorTypes.keys.filter { manager?.getDefaultSensor(sensorTypes.getValue(it)) != null }))) }
           "sensorStart" -> reply(startSensor(input, appId, emit))
           "sensorStop" -> { stopSensor("$appId:${id(input)}"); reply(result()) }
@@ -116,7 +110,6 @@ object ShellAppFeatures {
         val requestId = input.optString("requestId")
         when {
           speaking?.id == requestId -> stopSpeech(error = "unavailable")
-          recognizing?.id == requestId -> stopRecognition("unavailable")
           biometric?.id == requestId -> stopBiometric("unavailable")
           else -> reply(result("unavailable"))
         }
@@ -220,24 +213,6 @@ object ShellAppFeatures {
 
   private fun cancelSpeechQueries(appId: String, requestId: String? = null) {
     voiceTasks.values.filter { it.first.appId == appId && (requestId == null || it.first.id == requestId) }.toList().forEach { (task, engine) -> voiceTasks.remove(task.id); engine.shutdown(); complete(task, result("cancel")) }
-    languageTasks.values.filter { it.first.appId == appId && (requestId == null || it.first.id == requestId) }.toList().forEach { (task, engine) -> languageTasks.remove(task.id); engine.destroy(); complete(task, result("cancel")) }
-  }
-  private fun languages(input: JSONObject, appId: String, reply: (JSONObject) -> Unit) {
-    if (Build.VERSION.SDK_INT < 33) { reply(result("unsupported")); return }
-    if (languageTasks.size >= 2) { reply(result("busy")); return }
-    val onDevice = input.optBoolean("onDevice")
-    if (onDevice && !SpeechRecognizer.isOnDeviceRecognitionAvailable(context()) || !onDevice && !SpeechRecognizer.isRecognitionAvailable(context())) { reply(result("unsupported")); return }
-    val timeoutMs = input.optLong("timeoutMs", 8000).also { require(it in 1000..180000) }
-    val task = Task(appId, id(input), reply)
-    val engine = if (onDevice) SpeechRecognizer.createOnDeviceSpeechRecognizer(context()) else SpeechRecognizer.createSpeechRecognizer(context())
-    languageTasks[task.id] = task to engine
-    fun finish(value: JSONObject) { languageTasks.remove(task.id); engine.destroy(); complete(task, value) }
-    task.timeout = Runnable { finish(result("timeout")) }; main.postDelayed(task.timeout!!, timeoutMs)
-    try { engine.checkRecognitionSupport(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM), context().mainExecutor,
-      object : android.speech.RecognitionSupportCallback {
-        override fun onSupportResult(support: android.speech.RecognitionSupport) { if (!task.replied) finish(result().put("installed", JSONArray(support.installedOnDeviceLanguages)).put("supported", JSONArray(support.supportedOnDeviceLanguages)).put("online", JSONArray(support.onlineLanguages))) }
-        override fun onError(error: Int) { if (!task.replied) finish(result(if (error == SpeechRecognizer.ERROR_CANNOT_CHECK_SUPPORT) "unsupported" else "unavailable")) }
-      }) } catch (_: Exception) { finish(result("unavailable")) }
   }
   private fun voices(input: JSONObject, appId: String, reply: (JSONObject) -> Unit) {
     if (voiceTasks.size >= 2) { reply(result("busy")); return }
@@ -330,59 +305,6 @@ object ShellAppFeatures {
     speaking = null; tts?.stop(); complete(task, result(error))
   }
 
-  private fun recognize(input: JSONObject, appId: String, emit: (JSONObject) -> Unit, reply: (JSONObject) -> Unit) {
-    if (recognizing != null) { reply(result("busy")); return }
-    if (ContextCompat.checkSelfPermission(context(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reply(result("microphone-permission")); return }
-    val onDevice = input.optBoolean("onDevice")
-    if (onDevice && (Build.VERSION.SDK_INT < 31 || !SpeechRecognizer.isOnDeviceRecognitionAvailable(context())) || !onDevice && !SpeechRecognizer.isRecognitionAvailable(context())) { reply(result("unsupported")); return }
-    val language = input.optString("language", "zh-CN").also { require(it.length <= 40) }
-    val task = Task(appId, id(input), reply)
-    val engine = if (onDevice && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(context()) else SpeechRecognizer.createSpeechRecognizer(context())
-    recognizing = task; recognizer = engine
-    val timeout = Runnable { if (recognizing === task) stopRecognition("timeout") }
-    task.timeout = timeout
-    main.postDelayed(timeout, 600_000)
-    fun finish(value: JSONObject) {
-      if (recognizing !== task) return
-      recognizing = null; recognizer = null; runCatching { engine.destroy() }; complete(task, value)
-    }
-    engine.setRecognitionListener(object : RecognitionListener {
-      private fun state(value: String) { if (recognizing === task) emit(JSONObject().put("appId", appId).put("requestId", task.id).put("kind", "speech-state").put("state", value)) }
-      private var lastLevel = 0L
-      override fun onReadyForSpeech(params: android.os.Bundle?) { state("listening") }
-      override fun onBeginningOfSpeech() { state("hearing") }
-      override fun onRmsChanged(rmsdB: Float) {
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (recognizing === task && rmsdB.isFinite() && now - lastLevel >= 80) { lastLevel = now; emit(JSONObject().put("appId", appId).put("requestId", task.id).put("kind", "speech-volume").put("level", rmsdB.toDouble())) }
-      }
-      override fun onBufferReceived(buffer: ByteArray?) = Unit
-      override fun onEndOfSpeech() { state("processing") }
-      override fun onError(error: Int) { finish(result(when (error) {
-        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "speech-permission"
-        SpeechRecognizer.ERROR_NO_MATCH -> "no-match"
-        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "timeout"
-        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network"
-        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "busy"
-        SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED -> "language"
-        SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE -> "missing-data"
-        else -> "speech"
-      })) }
-      override fun onResults(results: android.os.Bundle?) { val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull(); finish(if (text.isNullOrBlank()) result("no-match") else result().put("text", text)) }
-      override fun onPartialResults(partialResults: android.os.Bundle?) { if (recognizing === task) partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { text -> runCatching { emit(JSONObject().put("appId", appId).put("requestId", task.id).put("kind", "speech").put("text", text)) } } }
-      override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
-    })
-    try { engine.startListening(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-      .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-      .putExtra(RecognizerIntent.EXTRA_LANGUAGE, language).putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-      .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 60_000)
-      .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 60_000)
-      .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)) } catch (_: Exception) { finish(result("unavailable")) }
-  }
-  private fun stopRecognition(error: String = "cancel") {
-    val task = recognizing ?: return
-    recognizing = null; val engine = recognizer; recognizer = null; runCatching { engine?.cancel(); engine?.destroy() }; complete(task, result(error))
-  }
-
   private val sensorTypes = mapOf("accelerometer" to Sensor.TYPE_ACCELEROMETER, "gyroscope" to Sensor.TYPE_GYROSCOPE, "gravity" to Sensor.TYPE_GRAVITY, "rotation" to Sensor.TYPE_ROTATION_VECTOR)
   private fun startSensor(input: JSONObject, appId: String, emit: (JSONObject) -> Unit): JSONObject {
     val key = "$appId:${id(input)}"; stopSensor(key)
@@ -441,11 +363,11 @@ object ShellAppFeatures {
     cancelSpeechQueries(appId)
     awake.remove(appId); updateAwake()
     stopSpeech(appId)
-    if (recognizing?.appId == appId) stopRecognition()
+    ShellAsr.cancel(appId)
     if (includeBiometric && biometric?.appId == appId) stopBiometric()
     sensors.filterValues { it.first == appId }.keys.toList().forEach { stopSensor(it) }
   }
   fun stopAll(includeBiometric: Boolean = true) {
-    main.post { awake.clear(); updateAwake(); stopSpeech(); stopRecognition(); if (includeBiometric) stopBiometric(); sensors.keys.toList().forEach { stopSensor(it) }; (voiceTasks.values.map { it.first.appId } + languageTasks.values.map { it.first.appId }).toSet().forEach { cancelSpeechQueries(it) }; speechGeneration++; tts?.shutdown(); tts = null; ttsReady = false }
+    main.post { awake.clear(); updateAwake(); stopSpeech(); ShellAsr.cancel(); if (includeBiometric) stopBiometric(); sensors.keys.toList().forEach { stopSensor(it) }; voiceTasks.values.map { it.first.appId }.toSet().forEach { cancelSpeechQueries(it) }; speechGeneration++; tts?.shutdown(); tts = null; ttsReady = false }
   }
 }

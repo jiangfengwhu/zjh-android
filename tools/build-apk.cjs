@@ -5,6 +5,7 @@ const { execFileSync } = require('node:child_process');
 async function buildApk(root, { reuseOnly = false } = {}) {
   const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true }).trim();
   const clean = () => !git(['status', '--porcelain']);
+  await require('./prepare-asr.cjs').prepareAsr(root);
   execFileSync(process.execPath, [path.join(root, 'tools/prepare-apk.cjs')], { cwd: root, stdio: 'inherit', windowsHide: true });
   const inputs = async () => JSON.stringify({
     tree: git(['ls-tree', '-r', 'HEAD', '--', 'android', 'specs', 'patches', 'config', 'package.json', 'package-lock.json', 'tools']),

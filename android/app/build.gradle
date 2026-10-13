@@ -9,6 +9,7 @@ def runtimeOutput = providers.exec {
 runtimeOutput.result.get().assertNormalExitValue()
 def bundleRuntimeVersion = runtimeOutput.standardOutput.asText.get().trim()
 def apkVersion = new groovy.json.JsonSlurper().parse(file("../../config/apk-version.json"))
+def asrConfig = new groovy.json.JsonSlurper().parse(file("../../config/asr.json"))
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -94,6 +95,9 @@ android {
     buildFeatures {
         buildConfig true
     }
+    sourceSets.main.assets.srcDir(file("../../.cache/asr/assets"))
+    androidResources.noCompress += ["onnx"]
+    defaultConfig.ndk.abiFilters.addAll(providers.gradleProperty("reactNativeArchitectures").get().split(","))
     defaultConfig {
         applicationId "com.zijinhua.app"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -137,8 +141,14 @@ tasks.register("verifyReleaseRuntime") {
 tasks.configureEach { task ->
     if (task.name == "preReleaseBuild") task.dependsOn("verifyReleaseRuntime")
 }
+tasks.register("prepareLocalAsr", Exec) {
+    workingDir file("../..")
+    commandLine "node", "tools/prepare-asr.cjs"
+}
+tasks.named("preBuild").configure { dependsOn("prepareLocalAsr") }
 
 dependencies {
+    implementation files("../../.cache/asr/sherpa-onnx-${asrConfig.sherpaVersion}.aar")
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     implementation("androidx.fragment:fragment-ktx:1.8.9")

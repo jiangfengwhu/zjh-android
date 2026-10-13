@@ -5,6 +5,7 @@
   "scripts": {
     "postinstall": "patch-package",
     "prepare:apk": "node tools/prepare-apk.cjs",
+    "prepare:asr": "node tools/prepare-asr.cjs",
     "build:apk": "node tools/build-apk.cjs",
     "publish:runtime": "node tools/publish-runtime.cjs",
     "publish:apk": "node tools/publish-apk.cjs"
