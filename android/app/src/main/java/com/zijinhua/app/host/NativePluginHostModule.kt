@@ -18,10 +18,18 @@ import com.zijinhua.app.shell.ShellOperations
 import com.zijinhua.app.shell.ShellDocuments
 import com.zijinhua.app.shell.ShellWidgets
 import com.zijinhua.app.shell.ShellAppFeatures
+import com.zijinhua.app.shell.ShellAsrModels
 import org.json.JSONObject
 
 class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePluginHostSpec(reactContext) {
   init { ShellAppFeatures.attachContext(reactContext.applicationContext) }
+  private val modelListener: (JSONObject) -> Unit = { value ->
+    if (current() && reactApplicationContext.hasActiveReactInstance()) {
+      val event = Arguments.createMap().apply { putString("payload", value.toString()) }
+      reactApplicationContext.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java).emit("zijinhua.asr-model", event)
+    }
+  }
+  init { ShellAsrModels.observe(modelListener) }
   private val aiRequests = ConcurrentHashMap.newKeySet<String>()
   private val tasks = ConcurrentHashMap<FutureTask<Unit>, ExecutorService>()
   private val lifecycle = Any()
@@ -38,6 +46,7 @@ class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePlug
     if (!current()) { task.cancel(false); (executor as ThreadPoolExecutor).remove(task) }
   }
   override fun invalidate() {
+    ShellAsrModels.unobserve(modelListener); ShellAsrModels.cancel()
     synchronized(lifecycle) {
       invalidated = true
       aiRequests.forEach { ShellAi.cancel(it) }
@@ -54,6 +63,10 @@ class NativePluginHostModule(reactContext: ReactApplicationContext) : NativePlug
   }
   override fun call(pluginId: String, method: String, payload: String, promise: Promise) {
     if (!current()) return
+    if (pluginId == "shell" && method in ShellAsrModels.methods) {
+      ShellAsrModels.call(reactApplicationContext, method) { if (current()) promise.resolve(it.toString()) }
+      return
+    }
     if (pluginId == "shell" && method in ShellOperations.methods) {
       try { ShellOperations.call(reactApplicationContext, method, JSONObject(payload), { if (current()) promise.resolve(it.toString()) }, ::current) }
       catch (_: Exception) { promise.resolve(JSONObject().put("ok", false).put("error", "unavailable").toString()) }

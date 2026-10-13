@@ -95,4 +95,4 @@ npm ci / npm install 的 postinstall 自动运行 patch-package。补丁改变�
 
 文档正文提取在现有两路文档 IO 池执行，PDF 复用 PDFBox，DOC 使用 Apache POI，DOCX 流式解析正文 XML；只将有上限的文字返回 RN。超时或取消先响应用户，解析退出后释放工作槽，不增加权限。公共接口与限制见 SDK README。
 
-ASR由Sherpa-ONNX 1.13.8与X-ASR中英带标点int8流式模型实现，已删除系统SpeechRecognizer依赖。`prepare:asr`按config/asr.json准备AAR与模型，build:apk自动调用并复用.cache/asr，资源随APK内置，不在运行时下载。AudioRecord持续收音，独立采集线程与两线程CPU推理解耦；首次模型加载期间也保留音频，队列最多12.8秒，超载明确报错而不静默丢音频。关闭自动端点检测，不因静音或固定时长结束；结束先停止收音、再排空队列与补齐模型右上下文，取消、隐藏或切后台立即停止。模型在后台线程懒加载，闲置60秒释放，不占主线程做推理。依然只需要麦克风权限，不启动后台录音服务；公共使用说明只维护在SDK README。
+ASR由Sherpa-ONNX 1.13.8与X-ASR中英带标点int8流式模型实现，已删除系统SpeechRecognizer依赖。`prepare:asr`仅准备AAR，build:apk自动调用并复用.cache/asr；APK不含模型。`publish:asr`单独准备模型并发布到既有R2/CDN，按config/asr.json固定版本与长度。首次使用由宿主确认下载，设置里管理；模型保存于noBackupFilesDir/asr-models，全设备共享，下载取消保留完整文件，按长度确认后原子提交，不计算SHA-256。删除前停止新的识别并在推理线程释放模型，正在识别时拒绝删除。AudioRecord持续收音，独立采集线程与两线程CPU推理解耦；首次模型加载期间也保留音频，队列最多12.8秒，超载明确报错而不静默丢音频。关闭自动端点检测，不因静音或固定时长结束；结束先停止收音、再排空队列与补齐模型右上下文，取消、隐藏或切后台立即停止。模型在后台线程懒加载，闲置60秒释放，不占主线程做推理。依然只需要麦克风权限，不启动后台录音服务；公共使用说明只维护在SDK README。

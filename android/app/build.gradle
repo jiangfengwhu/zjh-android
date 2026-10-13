@@ -95,8 +95,6 @@ android {
     buildFeatures {
         buildConfig true
     }
-    sourceSets.main.assets.srcDir(file("../../.cache/asr/assets"))
-    androidResources.noCompress += ["onnx"]
     defaultConfig.ndk.abiFilters.addAll(providers.gradleProperty("reactNativeArchitectures").get().split(","))
     defaultConfig {
         applicationId "com.zijinhua.app"
@@ -105,6 +103,8 @@ android {
         versionCode apkVersion.versionCode
         versionName apkVersion.versionName
         buildConfigField "String", "BUNDLE_RUNTIME_VERSION", "\"${bundleRuntimeVersion}\""
+        buildConfigField "String", "ASR_MODEL_ID", groovy.json.JsonOutput.toJson(asrConfig.model)
+        buildConfigField "String", "ASR_MODEL_FILES", groovy.json.JsonOutput.toJson(groovy.json.JsonOutput.toJson(asrConfig.files))
     }
     signingConfigs {
         debug {

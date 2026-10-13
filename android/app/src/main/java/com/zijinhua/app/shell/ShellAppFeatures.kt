@@ -84,13 +84,13 @@ object ShellAppFeatures {
           "shortcutRemove" -> { removeShortcut(appId, input.getString("id")); reply(result()) }
           "removeApplicationShortcuts" -> { removeShortcuts(appId); reply(result()) }
           "calendarCompose" -> reply(calendar(input))
-          "speechStatus" -> reply(result().put("recognition", ShellAsr.available(context()))
-            .put("onDevice", ShellAsr.available(context()))
+          "speechStatus" -> reply(result().put("recognition", true).put("modelReady", ShellAsr.available(context()))
+            .put("onDevice", true)
             .put("microphone", ContextCompat.checkSelfPermission(context(), Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
             .put("tts", context().packageManager.queryIntentServices(Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0).isNotEmpty()))
           "speechSpeak" -> speak(input, appId, emit, reply)
           "speechVoices" -> voices(input, appId, reply)
-          "speechLanguages" -> reply(ShellAsr.languages())
+          "speechLanguages" -> reply(ShellAsr.languages(context()))
           "speechQueryCancel" -> { cancelSpeechQueries(appId, id(input)); reply(result()) }
           "speechStop" -> { if (!input.has("requestId") || speaking?.id == id(input)) stopSpeech(appId); reply(result()) }
           "speechRecognize" -> ShellAsr.recognize(context(), input, appId, emit, reply)

@@ -47,12 +47,15 @@ object ShellAsr {
     @Volatile var failure: String? = null
   }
   private fun result(error: String? = null) = JSONObject().put("ok", error == null).apply { if (error != null) put("error", error) }
-  fun available(context: Context): Boolean = runCatching {
-    context.assets.list("asr")?.toSet()?.containsAll(setOf("encoder.int8.onnx", "decoder.onnx", "joiner.int8.onnx", "tokens.txt")) == true
-  }.getOrDefault(false)
-  fun languages() = result().put("installed", JSONArray(listOf("zh-CN", "en-US"))).put("supported", JSONArray(listOf("zh-CN", "en-US"))).put("online", JSONArray())
+  fun available(context: Context) = ShellAsrModels.ready(context)
+  fun busy() = current != null
+  fun releaseModel(done: (Boolean) -> Unit) {
+    main.removeCallbacks(releaseIdle)
+    inference.execute { val released = runCatching { check(current == null); cached?.release(); cached = null }.isSuccess; done(released) }
+  }
+  fun languages(context: Context) = result().put("installed", JSONArray(if (available(context)) listOf("zh-CN", "en-US") else emptyList<String>())).put("supported", JSONArray(listOf("zh-CN", "en-US"))).put("online", JSONArray())
   fun recognize(context: Context, input: JSONObject, appId: String, emit: (JSONObject) -> Unit, reply: (JSONObject) -> Unit) {
-    if (current != null) { reply(result("busy")); return }
+    if (current != null || ShellAsrModels.changing()) { reply(result("busy")); return }
     if (!ShellVisibility.active(appId)) { reply(result("cancel")); return }
     if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) { reply(result("microphone-permission")); return }
     val language = input.optString("language", "zh-CN").replace('_', '-').lowercase()
@@ -61,6 +64,7 @@ object ShellAsr {
     val id = input.getString("requestId").also { require(it.matches(Regex("[A-Za-z0-9._:-]{1,160}"))) }
     val session = Session(appId, id, emit, reply)
     current = session; main.removeCallbacks(releaseIdle)
+    ShellAsrModels.changed(context)
     inference.execute { run(context.applicationContext, session) }
   }
   fun finish(appId: String) { current?.takeIf { it.appId == appId }?.stop?.set(true) }
@@ -77,11 +81,11 @@ object ShellAsr {
   }
   private fun recognizer(context: Context): OnlineRecognizer {
     cached?.let { return it }
-    return OnlineRecognizer(context.assets, OnlineRecognizerConfig(
+    return OnlineRecognizer(config = OnlineRecognizerConfig(
       featConfig = FeatureConfig(sampleRate = RATE, featureDim = 80),
       modelConfig = OnlineModelConfig(
-        transducer = OnlineTransducerModelConfig(encoder = "asr/encoder.int8.onnx", decoder = "asr/decoder.onnx", joiner = "asr/joiner.int8.onnx"),
-        tokens = "asr/tokens.txt", numThreads = 2, provider = "cpu", modelType = "zipformer2", debug = false,
+        transducer = OnlineTransducerModelConfig(encoder = ShellAsrModels.file(context, "encoder.int8.onnx").absolutePath, decoder = ShellAsrModels.file(context, "decoder.onnx").absolutePath, joiner = ShellAsrModels.file(context, "joiner.int8.onnx").absolutePath),
+        tokens = ShellAsrModels.file(context, "tokens.txt").absolutePath, numThreads = 2, provider = "cpu", modelType = "zipformer2", debug = false,
       ),
       enableEndpoint = false,
     )).also { cached = it }
@@ -135,6 +139,7 @@ object ShellAsr {
       session.audio.clear()
       main.post {
         if (current === session) current = null
+        ShellAsrModels.changed(context)
         if (session.replied.compareAndSet(false, true)) session.reply(value)
         main.removeCallbacks(releaseIdle); main.postDelayed(releaseIdle, 60_000)
       }

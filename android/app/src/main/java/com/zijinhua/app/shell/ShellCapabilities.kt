@@ -85,7 +85,7 @@ object ShellCapabilities {
       "healthStatus", "healthPermissions", "requestHealth", "healthSummary",
       "bluetoothState", "bluetoothDevices", "bluetoothScan", "nfcStatus", "nfcRead",
       "appearance", "systemBars", "bundleReady", "loadApp", "providers", "saveProvider", "deleteProvider", "complete", "completeCancel",
-    ).plus((ShellAppFeatures.methods + ShellDocuments.methods + ShellWidgets.methods + ShellOperations.methods)).toSet().forEach { methods.put(it) }
+    ).plus((ShellAppFeatures.methods + ShellAsrModels.methods + ShellDocuments.methods + ShellWidgets.methods + ShellOperations.methods)).toSet().forEach { methods.put(it) }
     return JSONObject().put("ok", true).put("methods", methods)
   }
 
